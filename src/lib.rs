@@ -5,12 +5,14 @@ mod audio;
 mod loading;
 mod menu;
 mod player;
+mod watchtower;
 
 use crate::actions::ActionsPlugin;
 use crate::audio::InternalAudioPlugin;
 use crate::loading::LoadingPlugin;
 use crate::menu::MenuPlugin;
 use crate::player::PlayerPlugin;
+use crate::watchtower::WatchtowerPlugin;
 
 use bevy::app::App;
 #[cfg(debug_assertions)]
@@ -29,6 +31,8 @@ enum GameState {
     Playing,
     // Here the menu is drawn and waiting for player interaction
     Menu,
+    // Development
+    Watchtower,
 }
 
 pub struct GamePlugin;
@@ -41,6 +45,7 @@ impl Plugin for GamePlugin {
             ActionsPlugin,
             InternalAudioPlugin,
             PlayerPlugin,
+            WatchtowerPlugin,
         ));
 
         #[cfg(debug_assertions)]
