@@ -1,4 +1,4 @@
-use crate::GameState;
+use crate::{watchtower, GameState};
 use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 use bevy_kira_audio::AudioSource;
@@ -19,7 +19,6 @@ impl Plugin for LoadingPlugin {
         );
         app.add_collection_to_loading_state::<_, AudioAssets>(GameState::Loading);
         app.add_collection_to_loading_state::<_, TextureAssets>(GameState::Loading);
-        app.add_collection_to_loading_state::<_, ModelAssets>(GameState::Loading);
 
         app.init_resource::<MaterialAssets>();
         app.init_resource::<MeshAssets>();
@@ -43,27 +42,31 @@ pub struct TextureAssets {
     pub github: Handle<Image>,
 }
 
-#[derive(AssetCollection, Resource)]
-pub struct ModelAssets {
-    #[asset(path = "models/watchtower.glb")]
-    pub watchtower: Handle<Scene>,
-}
-
 #[derive(Resource)]
 pub struct MeshAssets {
     pub square_plane: Handle<Mesh>,
+    pub checkers_piece: Handle<Mesh>,
+    pub watchtower: Handle<Mesh>,
 }
 
 impl FromWorld for MeshAssets {
     fn from_world(world: &mut World) -> Self {
         let world = world.cell();
         let mut meshes = world.get_resource_mut::<Assets<Mesh>>().unwrap();
+        let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
 
         MeshAssets {
             square_plane: meshes.add(Mesh::from(shape::Plane {
                 size: 1.,
                 ..default()
             })),
+            checkers_piece: meshes.add(Mesh::from(shape::Cylinder {
+                radius: 3.0,
+                height: 2.0,
+                resolution: 32,
+                ..default()
+            })),
+            watchtower: asset_server.load("models/watchtower.glb#Mesh0/Primitive0"),
         }
     }
 }
@@ -72,6 +75,8 @@ impl FromWorld for MeshAssets {
 pub struct MaterialAssets {
     pub black: Handle<StandardMaterial>,
     pub white: Handle<StandardMaterial>,
+    pub transparent_white: Handle<StandardMaterial>,
+    pub transparent_black: Handle<StandardMaterial>,
 }
 
 impl FromWorld for MaterialAssets {
@@ -84,6 +89,10 @@ impl FromWorld for MaterialAssets {
         MaterialAssets {
             black: materials_asset.add(bevy::prelude::Color::rgb(0., 0.1, 0.1).into()),
             white: materials_asset.add(bevy::prelude::Color::rgb(1., 0.9, 0.9).into()),
+            transparent_white: materials_asset
+                .add(bevy::prelude::Color::rgba(1., 0.9, 0.9, 0.5).into()),
+            transparent_black: materials_asset
+                .add(bevy::prelude::Color::rgba(0., 0.1, 0.1, 0.5).into()),
         }
     }
 }

@@ -39,7 +39,8 @@ pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.add_state::<GameState>().add_plugins((
+        app.add_state::<GameState>();
+        app.add_plugins((
             LoadingPlugin,
             MenuPlugin,
             ActionsPlugin,
