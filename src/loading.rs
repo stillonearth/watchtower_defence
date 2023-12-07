@@ -45,7 +45,9 @@ pub struct TextureAssets {
 #[derive(Resource)]
 pub struct MeshAssets {
     pub square_plane: Handle<Mesh>,
+    pub circle: Handle<Mesh>,
     pub checkers_piece: Handle<Mesh>,
+    pub go_piece: Handle<Mesh>,
     pub watchtower: Handle<Mesh>,
 }
 
@@ -60,10 +62,18 @@ impl FromWorld for MeshAssets {
                 size: 1.,
                 ..default()
             })),
+            circle: meshes.add(Mesh::from(shape::Circle {
+                radius: 0.3,
+                ..default()
+            })),
             checkers_piece: meshes.add(Mesh::from(shape::Cylinder {
                 radius: 3.0,
                 height: 2.0,
                 resolution: 32,
+                ..default()
+            })),
+            go_piece: meshes.add(Mesh::from(shape::Circle {
+                radius: 0.2,
                 ..default()
             })),
             watchtower: asset_server.load("models/watchtower.glb#Mesh0/Primitive0"),
@@ -75,6 +85,7 @@ impl FromWorld for MeshAssets {
 pub struct MaterialAssets {
     pub black: Handle<StandardMaterial>,
     pub white: Handle<StandardMaterial>,
+    pub red: Handle<StandardMaterial>,
     pub transparent_white: Handle<StandardMaterial>,
     pub transparent_black: Handle<StandardMaterial>,
 }
@@ -89,6 +100,7 @@ impl FromWorld for MaterialAssets {
         MaterialAssets {
             black: materials_asset.add(bevy::prelude::Color::rgb(0., 0.1, 0.1).into()),
             white: materials_asset.add(bevy::prelude::Color::rgb(1., 0.9, 0.9).into()),
+            red: materials_asset.add(bevy::prelude::Color::rgba(1., 0.1, 0.1, 0.5).into()),
             transparent_white: materials_asset
                 .add(bevy::prelude::Color::rgba(1., 0.9, 0.9, 0.5).into()),
             transparent_black: materials_asset
