@@ -22,7 +22,6 @@ struct BoardCamera;
 enum Side {
     Black,
     White,
-    Neutral,
 }
 
 #[derive(Component)]
@@ -39,7 +38,7 @@ struct Circle {
 }
 
 #[derive(Component)]
-struct GoPiece {
+struct Stone {
     pub i: usize,
     pub j: usize,
     pub side: Side,
@@ -60,11 +59,13 @@ enum GamePhase {
     #[default]
     Initialize,
     PlaceWatchtower,
+    // can't trigger PlaceWatchtower after PlaceWatchtower so there's a workaround
+    TriggerPlaceWatchtower,
     PlaceGoPiece,
     MoveDraught,
 }
 
-#[derive(Resource, Default, Clone, Copy)]
+#[derive(Resource, Default, Clone, Copy, Debug)]
 enum Turn {
     Black,
     #[default]
@@ -82,9 +83,16 @@ struct SelectedDraught {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum MoveType {
+enum CheckersMoveType {
     Regular,
     DraughtTakeOver,
+    TowerTakeOver,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GoMoveType {
+    Regular,
+    ,
     TowerTakeOver,
 }
 
@@ -100,22 +108,42 @@ impl GameLogic {
     fn next_state(&self) -> (GamePhase, Turn) {
         let (game_phase, turn) = self.log.last().unwrap();
         match game_phase {
-            GamePhase::PlaceWatchtower => (GamePhase::PlaceGoPiece, *turn),
-            GamePhase::PlaceGoPiece => {
-                if self.log.len() == 2 {
-                    return (GamePhase::PlaceWatchtower, Turn::Black);
-                }
-                (
-                    GamePhase::MoveDraught,
-                    match turn {
-                        Turn::Black => Turn::White,
-                        Turn::White => Turn::Black,
-                    },
-                )
-            }
+            GamePhase::PlaceWatchtower => match *turn {
+                Turn::Black => (GamePhase::MoveDraught, Turn::White),
+                Turn::White => (GamePhase::PlaceWatchtower, Turn::Black),
+            },
+            GamePhase::PlaceGoPiece => (
+                GamePhase::MoveDraught,
+                match turn {
+                    Turn::Black => Turn::White,
+                    Turn::White => Turn::Black,
+                },
+            ),
             GamePhase::MoveDraught => (GamePhase::PlaceGoPiece, *turn),
             _ => (GamePhase::PlaceWatchtower, *turn),
         }
+    }
+
+    fn legal_go_moves(
+        &self,
+        turn: Turn,
+        stone: (usize, usize),
+        black_draughts: Vec<(usize, usize)>,
+        white_draughts: Vec<(usize, usize)>,
+        white_stones: Vec<(usize, usize)>,
+        black_stones: Vec<(usize, usize)>,
+        white_tower: (usize, usize),
+        black_tower: (usize, usize),
+    ) 
+    // -> (
+    //     Vec<(usize, usize)>,
+    //     Vec<GoMoveType>,
+    //     Vec<(usize, usize)>,
+    {
+        let islands: Vec<Vec<(usize, usize)>> = Vec::new();
+
+
+        
     }
 
     fn legal_draught_moves(
@@ -128,7 +156,11 @@ impl GameLogic {
         black_stones: Vec<(usize, usize)>,
         white_tower: (usize, usize),
         black_tower: (usize, usize),
-    ) -> (Vec<(usize, usize)>, Vec<MoveType>, Vec<(usize, usize)>) {
+    ) -> (
+        Vec<(usize, usize)>,
+        Vec<CheckersMoveType>,
+        Vec<(usize, usize)>,
+    ) {
         let (
             (our_draughts, _our_stones, _our_tower),
             (enemy_draughts, _enemy_stones, _enemy_tower),
@@ -145,7 +177,7 @@ impl GameLogic {
 
         let mut legal_moves: Vec<(usize, usize)> = Vec::new();
         let mut takeovers: Vec<(usize, usize)> = Vec::new();
-        let mut legal_movetypes: Vec<MoveType> = Vec::new();
+        let mut legal_movetypes: Vec<CheckersMoveType> = Vec::new();
         let mut occupied_squares = our_draughts.clone();
         occupied_squares.extend(enemy_draughts.clone());
         // occupied_squares.extend(our_stones);
@@ -156,7 +188,7 @@ impl GameLogic {
         if up.1 < BOARD_SIZE && !occupied_squares.contains(&up) {
             legal_moves.push(up);
             takeovers.push((0, 0));
-            legal_movetypes.push(MoveType::Regular);
+            legal_movetypes.push(CheckersMoveType::Regular);
         }
 
         // move down
@@ -165,7 +197,7 @@ impl GameLogic {
             if !occupied_squares.contains(&down) {
                 legal_moves.push(down);
                 takeovers.push((0, 0));
-                legal_movetypes.push(MoveType::Regular);
+                legal_movetypes.push(CheckersMoveType::Regular);
             }
         }
 
@@ -175,7 +207,7 @@ impl GameLogic {
             if !occupied_squares.contains(&left) {
                 legal_moves.push(left);
                 takeovers.push((0, 0));
-                legal_movetypes.push(MoveType::Regular);
+                legal_movetypes.push(CheckersMoveType::Regular);
             }
         }
 
@@ -184,7 +216,7 @@ impl GameLogic {
         if right.0 < BOARD_SIZE && !occupied_squares.contains(&right) {
             legal_moves.push(right);
             takeovers.push((0, 0));
-            legal_movetypes.push(MoveType::Regular);
+            legal_movetypes.push(CheckersMoveType::Regular);
         }
 
         // move up left
@@ -193,7 +225,7 @@ impl GameLogic {
             if up_left.1 < BOARD_SIZE && !occupied_squares.contains(&up_left) {
                 legal_moves.push(up_left);
                 takeovers.push((0, 0));
-                legal_movetypes.push(MoveType::Regular);
+                legal_movetypes.push(CheckersMoveType::Regular);
             }
         }
 
@@ -205,7 +237,7 @@ impl GameLogic {
         {
             legal_moves.push(up_right);
             takeovers.push((0, 0));
-            legal_movetypes.push(MoveType::Regular);
+            legal_movetypes.push(CheckersMoveType::Regular);
         }
 
         // move down left
@@ -214,7 +246,7 @@ impl GameLogic {
             if !occupied_squares.contains(&down_left) {
                 legal_moves.push(down_left);
                 takeovers.push((0, 0));
-                legal_movetypes.push(MoveType::Regular);
+                legal_movetypes.push(CheckersMoveType::Regular);
             }
         }
 
@@ -224,7 +256,7 @@ impl GameLogic {
             if down_right.0 < BOARD_SIZE && !occupied_squares.contains(&down_right) {
                 legal_moves.push(down_right);
                 takeovers.push((0, 0));
-                legal_movetypes.push(MoveType::Regular);
+                legal_movetypes.push(CheckersMoveType::Regular);
             }
         }
 
@@ -238,7 +270,7 @@ impl GameLogic {
         {
             legal_moves.push(up);
             takeovers.push(up_takeover);
-            legal_movetypes.push(MoveType::DraughtTakeOver);
+            legal_movetypes.push(CheckersMoveType::DraughtTakeOver);
         }
 
         // down
@@ -248,7 +280,7 @@ impl GameLogic {
             if enemy_draughts.contains(&down_takeover) && !occupied_squares.contains(&down) {
                 legal_moves.push(down);
                 takeovers.push(down_takeover);
-                legal_movetypes.push(MoveType::DraughtTakeOver);
+                legal_movetypes.push(CheckersMoveType::DraughtTakeOver);
             }
         }
 
@@ -260,7 +292,7 @@ impl GameLogic {
                 {
                     legal_moves.push(left);
                     takeovers.push(left_takeover);
-                    legal_movetypes.push(MoveType::DraughtTakeOver);
+                    legal_movetypes.push(CheckersMoveType::DraughtTakeOver);
                 }
             }
         }
@@ -274,7 +306,7 @@ impl GameLogic {
         {
             legal_moves.push(right);
             takeovers.push(right_takeover);
-            legal_movetypes.push(MoveType::DraughtTakeOver);
+            legal_movetypes.push(CheckersMoveType::DraughtTakeOver);
         }
 
         // up-right
@@ -287,7 +319,7 @@ impl GameLogic {
         {
             legal_moves.push(up_right);
             takeovers.push(up_right_takeover);
-            legal_movetypes.push(MoveType::DraughtTakeOver);
+            legal_movetypes.push(CheckersMoveType::DraughtTakeOver);
         }
 
         // up-left
@@ -300,7 +332,7 @@ impl GameLogic {
             {
                 legal_moves.push(up_left);
                 takeovers.push(up_left_takeover);
-                legal_movetypes.push(MoveType::DraughtTakeOver);
+                legal_movetypes.push(CheckersMoveType::DraughtTakeOver);
             }
         }
 
@@ -314,7 +346,7 @@ impl GameLogic {
             {
                 legal_moves.push(down_right);
                 takeovers.push(down_right_takeover);
-                legal_movetypes.push(MoveType::DraughtTakeOver);
+                legal_movetypes.push(CheckersMoveType::DraughtTakeOver);
             }
         }
 
@@ -327,7 +359,7 @@ impl GameLogic {
             {
                 legal_moves.push(down_left);
                 takeovers.push(down_left_takeover);
-                legal_movetypes.push(MoveType::DraughtTakeOver);
+                legal_movetypes.push(CheckersMoveType::DraughtTakeOver);
             }
         }
 
@@ -343,6 +375,12 @@ impl Plugin for WatchtowerPlugin {
             .add_plugins(DefaultPickingPlugins)
             .add_systems(OnEnter(GameState::Watchtower), (spawn_camera, spawn_board))
             .add_systems(OnEnter(GamePhase::PlaceWatchtower), spawn_watchtower)
+            .add_systems(
+                OnEnter(GamePhase::TriggerPlaceWatchtower),
+                |mut game_phase: ResMut<NextState<GamePhase>>| {
+                    game_phase.set(GamePhase::PlaceWatchtower);
+                },
+            )
             .add_systems(OnEnter(GamePhase::PlaceGoPiece), spawn_go_piece)
             .add_systems(OnEnter(GamePhase::MoveDraught), prepare_move_draught)
             .add_systems(
@@ -351,7 +389,7 @@ impl Plugin for WatchtowerPlugin {
             )
             .add_systems(
                 Update,
-                place_go_piece.run_if(in_state(GamePhase::PlaceGoPiece)),
+                place_stone.run_if(in_state(GamePhase::PlaceGoPiece)),
             )
             .add_systems(
                 Update,
@@ -400,7 +438,7 @@ fn move_draught(
     mut commands: Commands,
     mut er_click_square: EventReader<EventClickSquare>,
     mut q_draughts: Query<(Entity, &mut Transform, &mut Draught)>,
-    mut q_stones: Query<&GoPiece>,
+    mut q_stones: Query<&Stone>,
     mut q_watchtowers: Query<&Watchtower>,
     q_squares: Query<(Entity, &mut Transform, &mut Square), Without<Draught>>,
     mut selected_draught: ResMut<SelectedDraught>,
@@ -490,7 +528,7 @@ fn move_draught(
             .unwrap();
         let move_type = possible_movetypes[possible_move_index];
 
-        if move_type == MoveType::DraughtTakeOver {
+        if move_type == CheckersMoveType::DraughtTakeOver {
             let takeover = takeovers[possible_move_index];
             let enemy_draught = q_draughts
                 .iter()
@@ -737,7 +775,7 @@ fn spawn_go_piece(
     }
 }
 
-fn place_go_piece(
+fn place_stone(
     mut commands: Commands,
     mut er_click_circle: EventReader<EventClickCircle>,
     q_circles: Query<(Entity, &mut Visibility, &Circle)>,
@@ -765,13 +803,13 @@ fn place_go_piece(
                 ))
                 .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
                 material: match side {
-                    Side::Black => materials.black.clone(),
-                    _ => materials.white.clone(),
+                    Side::Black => materials.blue.clone(),
+                    _ => materials.yellow.clone(),
                 },
                 ..default()
             },
-            Name::new("GoPiece"),
-            GoPiece {
+            Name::new("Stone"),
+            Stone {
                 i: circle.i,
                 j: circle.j,
                 side,
@@ -886,6 +924,7 @@ fn place_watchtower(
     mut turn: ResMut<Turn>,
     mut game_phase: ResMut<NextState<GamePhase>>,
     mut game_logic: ResMut<GameLogic>,
+    meshes: Res<MeshAssets>,
 ) {
     let turn_ = *turn;
 
@@ -894,7 +933,7 @@ fn place_watchtower(
         Turn::White => Side::White,
     };
 
-    let mut stop = || -> Turn {
+    let mut stop = |center: (usize, usize)| -> Turn {
         let material = match side {
             Side::Black => materials.black.clone(),
             _ => materials.white.clone(),
@@ -916,20 +955,63 @@ fn place_watchtower(
             commands.entity(entity).insert(material.clone());
         }
 
+        // place stones around watchtower
+        let initial_stone_positions: Vec<(i32, i32)> = vec![
+            (1, 1),
+            (1, 0),
+            (1, -1),
+            (1, -2),
+            (0, 1),
+            (0, -2),
+            (-1, 1),
+            (-1, -2),
+            (-2, 1),
+            (-2, 0),
+            (-2, -1),
+            (-2, -2),
+        ];
+
+        for isp in initial_stone_positions {
+            commands.spawn((
+                PbrBundle {
+                    mesh: meshes.go_piece.clone(),
+                    transform: Transform::from_translation(Vec3::new(
+                        (center.0 as i32 + isp.0) as f32 + 0.5,
+                        0.0002,
+                        (center.1 as i32 + isp.1) as f32 + 0.5,
+                    ))
+                    .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+                    material: match side {
+                        Side::Black => materials.blue.clone(),
+                        _ => materials.yellow.clone(),
+                    },
+                    ..default()
+                },
+                Name::new("Stone"),
+                Stone {
+                    i: (center.0 as i32 + isp.0) as usize,
+                    j: (center.1 as i32 + isp.1) as usize,
+                    side,
+                },
+            ));
+        }
+
         game_logic.log(GamePhase::PlaceWatchtower, turn_);
         let (next_phase, next_turn) = game_logic.next_state();
-        game_phase.set(next_phase);
+        if next_phase == GamePhase::PlaceWatchtower {
+            game_phase.set(GamePhase::TriggerPlaceWatchtower);
+        } else {
+            game_phase.set(next_phase);
+        }
+        *turn = next_turn;
 
         next_turn
     };
 
-    for _click in er_click_square.read() {
-        *turn = stop();
-        return;
-    }
-
-    for _click in er_click_watchtower.read() {
-        *turn = stop();
+    for click in er_click_square.read() {
+        let watchtower = q_watchtower.get_component::<Watchtower>(click.0).unwrap();
+        let center = (watchtower.i, watchtower.j);
+        *turn = stop(center);
         return;
     }
 
@@ -966,7 +1048,7 @@ fn place_watchtower(
                 + (center.1 as f32 - opposite_watchtower_position.1).powi(2))
             .sqrt();
 
-            if distance < 8.0 {
+            if distance < 5.0 {
                 continue;
             }
 

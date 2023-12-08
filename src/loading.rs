@@ -1,4 +1,4 @@
-use crate::{GameState};
+use crate::GameState;
 use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 use bevy_kira_audio::AudioSource;
@@ -10,10 +10,6 @@ pub struct LoadingPlugin;
 /// If interested, take a look at <https://bevy-cheatbook.github.io/features/assets.html>
 impl Plugin for LoadingPlugin {
     fn build(&self, app: &mut App) {
-        info!("here!");
-
-        // let my_gltf = ass.load("my.glb#Scene0");
-
         app.add_loading_state(
             LoadingState::new(GameState::Loading).continue_to_state(GameState::Watchtower),
         );
@@ -85,6 +81,8 @@ impl FromWorld for MeshAssets {
 pub struct MaterialAssets {
     pub black: Handle<StandardMaterial>,
     pub white: Handle<StandardMaterial>,
+    pub yellow: Handle<StandardMaterial>,
+    pub blue: Handle<StandardMaterial>,
     pub red: Handle<StandardMaterial>,
     pub transparent_white: Handle<StandardMaterial>,
     pub transparent_black: Handle<StandardMaterial>,
@@ -101,6 +99,8 @@ impl FromWorld for MaterialAssets {
             black: materials_asset.add(bevy::prelude::Color::rgb(0., 0.1, 0.1).into()),
             white: materials_asset.add(bevy::prelude::Color::rgb(1., 0.9, 0.9).into()),
             red: materials_asset.add(bevy::prelude::Color::rgba(1., 0.1, 0.1, 0.5).into()),
+            yellow: materials_asset.add(bevy::prelude::Color::YELLOW.into()),
+            blue: materials_asset.add(bevy::prelude::Color::BLUE.into()),
             transparent_white: materials_asset
                 .add(bevy::prelude::Color::rgba(1., 0.9, 0.9, 0.5).into()),
             transparent_black: materials_asset
