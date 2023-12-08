@@ -1,12 +1,14 @@
+use std::time::Duration;
+
 use crate::loading::{MaterialAssets, MeshAssets};
 use crate::GameState;
-use bevy_mod_picking::prelude::*;
-
 use bevy::prelude::*;
+use bevy_mod_picking::prelude::*;
+use bevy_tweening::*;
 
 pub struct WatchtowerPlugin;
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct Watchtower {
     pub i: usize,
     pub j: usize,
@@ -74,6 +76,11 @@ struct GameLogic {
     log: Vec<(GamePhase, Turn)>,
 }
 
+#[derive(Resource)]
+struct SelectedDraught {
+    n: Option<usize>,
+}
+
 impl GameLogic {
     fn new() -> Self {
         GameLogic { log: vec![] }
@@ -103,16 +110,45 @@ impl GameLogic {
             _ => (GamePhase::PlaceWatchtower, *turn),
         }
     }
+
+    fn legal_draught_moves(
+        &self,
+        turn: Turn,
+        draught: (usize, usize),
+        black_draughts: Vec<(usize, usize)>,
+        white_draughts: Vec<(usize, usize)>,
+        white_stones: Vec<(usize, usize)>,
+        black_stones: Vec<(usize, usize)>,
+        white_tower: (usize, usize),
+        black_tower: (usize, usize),
+    ) {
+        let ((our_draughts, our_stones, our_tower), (enemy_draughts, enemy_stones, enemy_tower)) =
+            match turn {
+                Turn::Black => (
+                    (black_draughts, black_stones, black_tower),
+                    (white_draughts, white_stones, white_tower),
+                ),
+                Turn::White => (
+                    (white_draughts, white_stones, white_tower),
+                    (black_draughts, black_stones, black_tower),
+                ),
+            };
+
+        let legal_moves: Vec<(usize, usize)> = Vec::new();
+        let occupied_squares = 
+    }
 }
 
 impl Plugin for WatchtowerPlugin {
     fn build(&self, app: &mut App) {
         app.add_state::<GamePhase>();
         app.init_resource::<Turn>();
-        app.add_plugins(DefaultPickingPlugins)
+        app.add_plugins(TweeningPlugin)
+            .add_plugins(DefaultPickingPlugins)
             .add_systems(OnEnter(GameState::Watchtower), (spawn_camera, spawn_board))
-            .add_systems(OnEnter(GamePhase::PlaceWatchtower), (spawn_watchtower))
-            .add_systems(OnEnter(GamePhase::PlaceGoPiece), (spawn_go_piece))
+            .add_systems(OnEnter(GamePhase::PlaceWatchtower), spawn_watchtower)
+            .add_systems(OnEnter(GamePhase::PlaceGoPiece), spawn_go_piece)
+            .add_systems(OnEnter(GamePhase::MoveDraught), prepare_move_draught)
             .add_systems(
                 Update,
                 place_watchtower.run_if(in_state(GamePhase::PlaceWatchtower)),
@@ -121,11 +157,128 @@ impl Plugin for WatchtowerPlugin {
                 Update,
                 place_go_piece.run_if(in_state(GamePhase::PlaceGoPiece)),
             )
+            .add_systems(
+                Update,
+                (select_draught, move_draught).run_if(in_state(GamePhase::MoveDraught)),
+            )
             .add_event::<EventHoverSquare>()
             .add_event::<EventClickWatchtower>()
             .add_event::<EventClickSquare>()
             .add_event::<EventClickCircle>()
-            .insert_resource(GameLogic::new());
+            .add_event::<EventClickDraught>()
+            .insert_resource(GameLogic::new())
+            .insert_resource(SelectedDraught { n: None });
+    }
+}
+
+fn select_draught(
+    mut er_click_draught: EventReader<EventClickDraught>,
+    q_draughts: Query<(Entity, &mut Draught)>,
+    mut selected_draught: ResMut<SelectedDraught>,
+) {
+    for click in er_click_draught.read() {
+        let draught = q_draughts.get_component::<Draught>(click.0).unwrap();
+        selected_draught.n = Some(draught.n);
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct TransformPositionWithYJumpLens {
+    pub start: Vec3,
+    pub end: Vec3,
+}
+
+impl Lens<Transform> for TransformPositionWithYJumpLens {
+    fn lerp(&mut self, target: &mut Transform, ratio: f32) {
+        let mut value = self.start + (self.end - self.start) * ratio;
+        if ratio < 0.5 {
+            value.y = ratio * 2.0 + 0.1;
+        } else {
+            value.y = (1.0 - ratio) * 2.0 + 0.1;
+        }
+        target.translation = value;
+    }
+}
+
+fn move_draught(
+    mut commands: Commands,
+    mut er_click_square: EventReader<EventClickSquare>,
+    q_draughts: Query<(Entity, &mut Transform, &mut Draught)>,
+    q_squares: Query<(Entity, &mut Transform, &mut Square), Without<Draught>>,
+    mut selected_draught: ResMut<SelectedDraught>,
+    mut turn: ResMut<Turn>,
+    mut game_logic: ResMut<GameLogic>,
+    mut game_phase: ResMut<NextState<GamePhase>>,
+) {
+    if selected_draught.n.is_none() {
+        return;
+    }
+
+    let turn_ = *turn;
+    let side = match turn_ {
+        Turn::Black => Side::Black,
+        Turn::White => Side::White,
+    };
+
+    for click in er_click_square.read() {
+        let square_position = q_squares
+            .get_component::<Transform>(click.0)
+            .unwrap()
+            .translation;
+
+        let draught = q_draughts
+            .iter()
+            .find(|d| d.2.n == selected_draught.n.unwrap() && d.2.side == side)
+            .unwrap();
+
+        let draught_position = draught.1.translation;
+        let draught_entity = draught.0;
+
+        let tween = Tween::new(
+            EaseFunction::QuadraticInOut,
+            Duration::from_millis(1000),
+            TransformPositionWithYJumpLens {
+                start: draught_position,
+                end: square_position,
+            },
+        );
+
+        commands.entity(draught_entity).insert(Animator::new(tween));
+
+        selected_draught.n = None;
+
+        game_logic.log(GamePhase::MoveDraught, *turn);
+        let (next_phase, next_turn) = game_logic.next_state();
+        *turn = next_turn;
+        game_phase.set(next_phase);
+
+        return;
+    }
+}
+
+fn prepare_move_draught(
+    mut commands: Commands,
+    mut q_circles: Query<(Entity, &mut Visibility, &Circle)>,
+    mut q_draughts: Query<(Entity, &mut Draught)>,
+    turn: ResMut<Turn>,
+) {
+    let turn = *turn;
+    let side = match turn {
+        Turn::Black => Side::Black,
+        Turn::White => Side::White,
+    };
+
+    for (entity, mut visibility, _) in q_circles.iter_mut() {
+        *visibility = Visibility::Hidden;
+        commands.entity(entity).remove::<PickableBundle>();
+    }
+
+    for (entity, draught) in q_draughts.iter_mut() {
+        if draught.side != side {
+            commands.entity(entity).remove::<PickableBundle>();
+        } else {
+            commands.entity(entity).insert(PickableBundle::default());
+        }
     }
 }
 
@@ -133,16 +286,25 @@ fn spawn_watchtower(
     mut commands: Commands,
     meshes: Res<MeshAssets>,
     materials: Res<MaterialAssets>,
-    mut turn: ResMut<Turn>,
-    mut game_phase: ResMut<NextState<GamePhase>>,
-    mut game_logic: ResMut<GameLogic>,
+    turn: ResMut<Turn>,
+    mut q_circles: Query<(Entity, &mut Visibility, &Circle)>,
 ) {
+    for (entity, mut visibility, _) in q_circles.iter_mut() {
+        *visibility = Visibility::Hidden;
+        commands.entity(entity).remove::<PickableBundle>();
+    }
+
     let center = (10.0, 10.0);
 
-    let turn_ = turn.clone();
+    let turn_ = *turn;
     let side = match turn_ {
         Turn::Black => Side::Black,
         Turn::White => Side::White,
+    };
+
+    let material = match side {
+        Side::Black => materials.transparent_black.clone(),
+        _ => materials.transparent_white.clone(),
     };
 
     let transform = Transform::from_xyz(center.0, 0.9, center.1)
@@ -151,7 +313,7 @@ fn spawn_watchtower(
     commands.spawn((
         PbrBundle {
             mesh: meshes.watchtower.clone(),
-            material: materials.transparent_white.clone(),
+            material: material.clone(),
             transform,
             ..default()
         },
@@ -188,22 +350,23 @@ fn spawn_watchtower(
 
         let transform = Transform::from_xyz(piece_position.0, 0.0, piece_position.1)
             .with_scale(Vec3::splat(0.1));
-        let piece = Draught {
+        let draught = Draught {
             i: piece_position.0 as usize,
             j: piece_position.1 as usize,
             n: i,
-            side: side.clone(),
+            side,
         };
 
         commands.spawn((
             PbrBundle {
                 mesh: meshes.checkers_piece.clone(),
                 transform,
-                material: materials.transparent_white.clone(),
+                material: material.clone(),
                 ..default()
             },
-            Name::new("Piece"),
-            piece,
+            Name::new("Draught"),
+            draught,
+            On::<Pointer<Click>>::send_event::<EventClickDraught>(),
         ));
     }
 }
@@ -223,6 +386,15 @@ struct EventClickSquare(Entity);
 impl From<ListenerInput<Pointer<Click>>> for EventClickSquare {
     fn from(event: ListenerInput<Pointer<Click>>) -> Self {
         EventClickSquare(event.target)
+    }
+}
+
+#[derive(Event)]
+struct EventClickDraught(Entity);
+
+impl From<ListenerInput<Pointer<Click>>> for EventClickDraught {
+    fn from(event: ListenerInput<Pointer<Click>>) -> Self {
+        EventClickDraught(event.target)
     }
 }
 
@@ -268,7 +440,7 @@ fn place_go_piece(
     mut game_phase: ResMut<NextState<GamePhase>>,
     mut game_logic: ResMut<GameLogic>,
 ) {
-    let turn_ = turn.clone();
+    let turn_ = *turn;
     let side = match turn_ {
         Turn::Black => Side::Black,
         Turn::White => Side::White,
@@ -292,7 +464,6 @@ fn place_go_piece(
                 ..default()
             },
             Name::new("GoPiece"),
-            PickableBundle::default(),
             GoPiece {
                 i: circle.i,
                 j: circle.j,
@@ -300,7 +471,7 @@ fn place_go_piece(
             },
         ));
 
-        game_logic.log(GamePhase::PlaceGoPiece, turn.clone());
+        game_logic.log(GamePhase::PlaceGoPiece, *turn);
         let (next_phase, next_turn) = game_logic.next_state();
         *turn = next_turn;
         game_phase.set(next_phase);
@@ -320,7 +491,6 @@ fn spawn_board(
     };
 
     // spawn checkerboard
-
     for i in 0..BOARD_SIZE {
         for j in 0..BOARD_SIZE {
             let n = i * BOARD_SIZE + j;
@@ -384,7 +554,7 @@ fn spawn_camera(mut commands: Commands) {
         ..Default::default()
     });
 
-    let camera_transform = Transform::from_translation(Vec3::new(-5.0, 20.0, 20.0))
+    let camera_transform = Transform::from_translation(Vec3::new(-5.0, 30.0, 20.0))
         .looking_at(Vec3::new(19.0 / 2.0, 0.0, 19.0 / 2.0), Vec3::Y);
 
     commands.spawn((
@@ -410,7 +580,7 @@ fn place_watchtower(
     mut game_phase: ResMut<NextState<GamePhase>>,
     mut game_logic: ResMut<GameLogic>,
 ) {
-    let turn_ = turn.clone();
+    let turn_ = *turn;
 
     let side = match turn_ {
         Turn::Black => Side::Black,
@@ -423,16 +593,20 @@ fn place_watchtower(
             _ => materials.white.clone(),
         };
 
-        for (entity, _, _) in q_pieces.iter() {
+        for (entity, _, draught) in q_pieces.iter() {
+            if draught.side != side {
+                continue;
+            }
             commands
                 .entity(entity)
                 .insert((PickableBundle::default(), material.clone()));
         }
 
-        for (entity, _, _) in q_watchtower.iter() {
-            commands
-                .entity(entity)
-                .insert((PickableBundle::default(), material.clone()));
+        for (entity, _, watchtower) in q_watchtower.iter() {
+            if watchtower.side != side {
+                continue;
+            }
+            commands.entity(entity).insert(material.clone());
         }
 
         game_logic.log(GamePhase::PlaceWatchtower, turn_);
@@ -452,6 +626,20 @@ fn place_watchtower(
         return;
     }
 
+    let opposite_side = match side {
+        Side::Black => Side::White,
+        _ => Side::Black,
+    };
+
+    let opposite_watchtower = q_watchtower
+        .iter_mut()
+        .find(|(_, _, watchtower)| watchtower.side == opposite_side);
+    let mut opposite_watchtower_position = (-128.0, 128.0);
+    if opposite_watchtower.is_some() {
+        let opp_watchtower = opposite_watchtower.unwrap().2;
+        opposite_watchtower_position = (opp_watchtower.i as f32, opp_watchtower.j as f32);
+    }
+
     for hover in er_hover_square.read() {
         let square = q_squares.get_component::<Square>(hover.0).unwrap();
         let center = (square.i, square.j);
@@ -461,7 +649,17 @@ fn place_watchtower(
                 continue;
             }
 
-            if (center.0 == 18 || center.1 == 18 || center.0 == 0 || center.1 == 0) {
+            // don't allow placing pieces on the edge
+            if center.0 > 15 || center.1 > 15 || center.0 < 3 || center.1 < 3 {
+                continue;
+            }
+
+            // don't allow placing pieces on the opposite watchtower
+            let distance = ((center.0 as f32 - opposite_watchtower_position.0).powi(2)
+                + (center.1 as f32 - opposite_watchtower_position.1).powi(2))
+            .sqrt();
+
+            if distance < 8.0 {
                 continue;
             }
 
