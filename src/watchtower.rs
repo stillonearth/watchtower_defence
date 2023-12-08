@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::loading::{MaterialAssets, MeshAssets};
@@ -92,7 +93,7 @@ enum CheckersMoveType {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum GoMoveType {
     Regular,
-    ,
+    StoneRemoval,
     TowerTakeOver,
 }
 
@@ -124,26 +125,161 @@ impl GameLogic {
         }
     }
 
+    fn find_region(
+        &self,
+        start: (usize, usize),
+        our_stones: Vec<(usize, usize)>,
+        visited: Vec<(usize, usize)>,
+    ) -> (Option<Vec<(usize, usize)>>, Vec<(usize, usize)>) {
+        if !our_stones.contains(&start) {
+            return (None, visited);
+        }
+
+        let mut region: Vec<(usize, usize)> = vec![];
+        let mut stack: Vec<(usize, usize)> = vec![start];
+        let mut visited = visited.clone();
+
+        while !stack.is_empty() {
+            let (i, j) = stack.pop().unwrap();
+            if visited.contains(&(i, j)) {
+                continue;
+            }
+            visited.push((i, j));
+            region.push((i, j));
+
+            // up
+            let up = (i, j + 1);
+            if up.1 < BOARD_SIZE && our_stones.contains(&up) && !region.contains(&up) {
+                stack.push(up);
+            }
+
+            // down
+            if j >= 1 {
+                let down = (i, j - 1);
+                if our_stones.contains(&down) && !region.contains(&down) {
+                    stack.push(down);
+                }
+            }
+
+            // left
+            if i >= 1 {
+                let left = (i - 1, j);
+                if our_stones.contains(&left) && !region.contains(&left) {
+                    stack.push(left);
+                }
+            }
+
+            // right
+            let right = (i + 1, j);
+            if right.0 < BOARD_SIZE && our_stones.contains(&right) && !region.contains(&right) {
+                stack.push(right);
+            }
+
+            // up-right
+            if i >= 1 {
+                let up_right = (i + 1, j + 1);
+                if up_right.1 < BOARD_SIZE
+                    && up_right.0 < BOARD_SIZE
+                    && our_stones.contains(&up_right)
+                    && !region.contains(&up_right)
+                {
+                    stack.push(up_right);
+                }
+            }
+            // up-left
+            if i >= 1 {
+                let up_left = (i - 1, j + 1);
+                if up_left.1 < BOARD_SIZE
+                    && our_stones.contains(&up_left)
+                    && !region.contains(&up_left)
+                {
+                    stack.push(up_left);
+                }
+            }
+            // down-right
+            if j >= 1 {
+                let down_right = (i + 1, j - 1);
+                if down_right.0 < BOARD_SIZE
+                    && our_stones.contains(&down_right)
+                    && !region.contains(&down_right)
+                {
+                    stack.push(down_right);
+                }
+            }
+            // down-left
+            if j >= 1 && i >= 1 {
+                let down_left = (i - 1, j - 1);
+                if our_stones.contains(&down_left) && !region.contains(&down_left) {
+                    stack.push(down_left);
+                }
+            }
+        }
+
+        if region.len() < 2 {
+            return (None, visited);
+        }
+
+        // find set of horizontal components of a region
+        let horizontal_components = region.iter().map(|(i, _)| *i).collect::<Vec<usize>>();
+        let horizontal_components: HashSet<usize> = horizontal_components.into_iter().collect();
+        let mut filled_region: Vec<(usize, usize)> = Vec::new();
+        for i in horizontal_components {
+            // find min and max j
+            let vertical_components = region
+                .iter()
+                .filter(|(i_, _)| *i_ == i)
+                .map(|(_, j)| *j)
+                .collect::<Vec<usize>>();
+            let min_j = *vertical_components.iter().min().unwrap();
+            let max_j = *vertical_components.iter().max().unwrap();
+
+            for j in min_j..=max_j {
+                filled_region.push((i, j));
+            }
+        }
+
+        return (Some(filled_region), visited);
+    }
+
     fn legal_go_moves(
         &self,
         turn: Turn,
-        stone: (usize, usize),
         black_draughts: Vec<(usize, usize)>,
         white_draughts: Vec<(usize, usize)>,
         white_stones: Vec<(usize, usize)>,
         black_stones: Vec<(usize, usize)>,
         white_tower: (usize, usize),
         black_tower: (usize, usize),
-    ) 
-    // -> (
-    //     Vec<(usize, usize)>,
-    //     Vec<GoMoveType>,
-    //     Vec<(usize, usize)>,
-    {
-        let islands: Vec<Vec<(usize, usize)>> = Vec::new();
+    ) -> Vec<Vec<(usize, usize)>> {
+        let (
+            (_our_draughts, our_stones, _our_tower),
+            (_enemy_draughts, enemy_stones, _enemy_tower),
+        ) = match turn {
+            Turn::Black => (
+                (black_draughts, black_stones, black_tower),
+                (white_draughts, white_stones, white_tower),
+            ),
+            Turn::White => (
+                (white_draughts, white_stones, white_tower),
+                (black_draughts, black_stones, black_tower),
+            ),
+        };
 
+        let mut visited: Vec<(usize, usize)> = Vec::new();
+        let mut convexes = Vec::new();
+        for i in 0..BOARD_SIZE {
+            for j in 0..BOARD_SIZE {
+                let (region, visited_) =
+                    self.find_region((i, j), our_stones.clone(), visited.clone());
 
-        
+                if region.is_some() {
+                    convexes.push(region.unwrap());
+                    visited = visited_;
+                }
+            }
+        }
+
+        return convexes;
     }
 
     fn legal_draught_moves(
@@ -775,6 +911,9 @@ fn spawn_go_piece(
     }
 }
 
+#[derive(Component)]
+struct DebugSquare;
+
 fn place_stone(
     mut commands: Commands,
     mut er_click_circle: EventReader<EventClickCircle>,
@@ -784,7 +923,47 @@ fn place_stone(
     mut turn: ResMut<Turn>,
     mut game_phase: ResMut<NextState<GamePhase>>,
     mut game_logic: ResMut<GameLogic>,
+    mut q_draughts: Query<(Entity, &mut Transform, &mut Draught)>,
+    mut q_stones: Query<&Stone>,
+    mut q_watchtowers: Query<&Watchtower>,
+    mut q_debug_squares: Query<Entity, With<DebugSquare>>,
 ) {
+    let black_draughts = q_draughts
+        .iter_mut()
+        .filter(|(_, _, draught)| draught.side == Side::Black)
+        .map(|(_, _, draught)| (draught.i, draught.j))
+        .collect::<Vec<(usize, usize)>>();
+
+    let white_draughts = q_draughts
+        .iter_mut()
+        .filter(|(_, _, draught)| draught.side == Side::White)
+        .map(|(_, _, draught)| (draught.i, draught.j))
+        .collect::<Vec<(usize, usize)>>();
+
+    let mut black_stones = q_stones
+        .iter_mut()
+        .filter(|go_piece| go_piece.side == Side::Black)
+        .map(|go_piece| (go_piece.i, go_piece.j))
+        .collect::<Vec<(usize, usize)>>();
+
+    let mut white_stones = q_stones
+        .iter_mut()
+        .filter(|go_piece| go_piece.side == Side::White)
+        .map(|go_piece| (go_piece.i, go_piece.j))
+        .collect::<Vec<(usize, usize)>>();
+
+    let white_watchtower = q_watchtowers
+        .iter_mut()
+        .find(|watchtower| watchtower.side == Side::White)
+        .unwrap();
+    let white_watchtower = (white_watchtower.i, white_watchtower.j);
+
+    let black_watchtower = q_watchtowers
+        .iter_mut()
+        .find(|watchtower| watchtower.side == Side::Black)
+        .unwrap();
+    let black_watchtower = (black_watchtower.i, black_watchtower.j);
+
     let turn_ = *turn;
     let side = match turn_ {
         Turn::Black => Side::Black,
@@ -816,10 +995,53 @@ fn place_stone(
             },
         ));
 
+        match side {
+            Side::Black => black_stones.push((circle.i, circle.j)),
+            Side::White => white_stones.push((circle.i, circle.j)),
+        }
+
+        let convex_sets = game_logic.legal_go_moves(
+            turn_,
+            black_draughts,
+            white_draughts,
+            white_stones,
+            black_stones,
+            white_watchtower,
+            black_watchtower,
+        );
+
+        // despawn debug squares
+        for entity in q_debug_squares.iter_mut() {
+            commands.entity(entity).despawn_recursive();
+        }
+
+        println!("n_convex_sets: {}", convex_sets.len());
+
+        for convex in convex_sets.iter() {
+            for (i, j) in convex.iter() {
+                // spawn debug square
+                commands.spawn((
+                    PbrBundle {
+                        mesh: meshes.square_plane.clone(),
+                        material: materials.red.clone(),
+                        transform: Transform::from_translation(Vec3::new(
+                            *i as f32 + 0.5,
+                            0.0005,
+                            *j as f32 + 0.5,
+                        )),
+                        ..default()
+                    },
+                    Name::new("DebugSquare"),
+                    DebugSquare,
+                ));
+            }
+        }
+
         game_logic.log(GamePhase::PlaceGoPiece, *turn);
         let (next_phase, next_turn) = game_logic.next_state();
         *turn = next_turn;
         game_phase.set(next_phase);
+        return;
     }
 }
 
