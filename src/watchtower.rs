@@ -121,7 +121,7 @@ impl GameLogic {
         black_stones: Vec<(usize, usize)>,
         white_tower: (usize, usize),
         black_tower: (usize, usize),
-    ) {
+    ) -> Vec<(usize, usize)> {
         let ((our_draughts, our_stones, our_tower), (enemy_draughts, enemy_stones, enemy_tower)) =
             match turn {
                 Turn::Black => (
@@ -134,8 +134,74 @@ impl GameLogic {
                 ),
             };
 
-        let legal_moves: Vec<(usize, usize)> = Vec::new();
-        let occupied_squares = 
+        let mut legal_moves: Vec<(usize, usize)> = Vec::new();
+        let mut occupied_squares = our_draughts.clone();
+        occupied_squares.extend(enemy_draughts);
+        // occupied_squares.extend(our_stones);
+        // occupied_squares.extend(enemy_stones);
+
+        // move up
+        let up = (draught.0, draught.1 + 1);
+        if up.1 < BOARD_SIZE && !occupied_squares.contains(&up) {
+            legal_moves.push(up);
+        }
+
+        // move down
+        if draught.1 >= 1 {
+            let down = (draught.0, draught.1 - 1);
+            if !occupied_squares.contains(&down) {
+                legal_moves.push(down);
+            }
+        }
+
+        // move left
+        if draught.0 >= 1 {
+            let left = (draught.0 - 1, draught.1);
+            if !occupied_squares.contains(&left) {
+                legal_moves.push(left);
+            }
+        }
+
+        // move right
+        let right = (draught.0 + 1, draught.1);
+        if right.0 < BOARD_SIZE && !occupied_squares.contains(&right) {
+            legal_moves.push(right);
+        }
+
+        // move up left
+        if draught.0 >= 1 {
+            let up_left = (draught.0 - 1, draught.1 + 1);
+            if up_left.1 < BOARD_SIZE && !occupied_squares.contains(&up_left) {
+                legal_moves.push(up_left);
+            }
+        }
+
+        // move up right
+        let up_right = (draught.0 + 1, draught.1 + 1);
+        if up_right.0 < BOARD_SIZE
+            && up_right.1 < BOARD_SIZE
+            && !occupied_squares.contains(&up_right)
+        {
+            legal_moves.push(up_right);
+        }
+
+        // move down left
+        if draught.0 >= 1 && draught.1 >= 1 {
+            let down_left = (draught.0 - 1, draught.1 - 1);
+            if !occupied_squares.contains(&down_left) {
+                legal_moves.push(down_left);
+            }
+        }
+
+        // move down right
+        if draught.1 >= 1 {
+            let down_right = (draught.0 + 1, draught.1 - 1);
+            if down_right.0 < BOARD_SIZE && !occupied_squares.contains(&down_right) {
+                legal_moves.push(down_right);
+            }
+        }
+
+        return legal_moves;
     }
 }
 
@@ -203,7 +269,9 @@ impl Lens<Transform> for TransformPositionWithYJumpLens {
 fn move_draught(
     mut commands: Commands,
     mut er_click_square: EventReader<EventClickSquare>,
-    q_draughts: Query<(Entity, &mut Transform, &mut Draught)>,
+    mut q_draughts: Query<(Entity, &mut Transform, &mut Draught)>,
+    mut q_stones: Query<&GoPiece>,
+    mut q_watchtowers: Query<&Watchtower>,
     q_squares: Query<(Entity, &mut Transform, &mut Square), Without<Draught>>,
     mut selected_draught: ResMut<SelectedDraught>,
     mut turn: ResMut<Turn>,
@@ -220,11 +288,44 @@ fn move_draught(
         Turn::White => Side::White,
     };
 
+    let black_draughts = q_draughts
+        .iter_mut()
+        .filter(|(_, _, draught)| draught.side == Side::Black)
+        .map(|(_, _, draught)| (draught.i, draught.j))
+        .collect::<Vec<(usize, usize)>>();
+
+    let white_draughts = q_draughts
+        .iter_mut()
+        .filter(|(_, _, draught)| draught.side == Side::White)
+        .map(|(_, _, draught)| (draught.i, draught.j))
+        .collect::<Vec<(usize, usize)>>();
+
+    let black_stones = q_stones
+        .iter_mut()
+        .filter(|go_piece| go_piece.side == Side::Black)
+        .map(|go_piece| (go_piece.i, go_piece.j))
+        .collect::<Vec<(usize, usize)>>();
+
+    let white_stones = q_stones
+        .iter_mut()
+        .filter(|go_piece| go_piece.side == Side::White)
+        .map(|go_piece| (go_piece.i, go_piece.j))
+        .collect::<Vec<(usize, usize)>>();
+
+    let white_watchtower = q_watchtowers
+        .iter_mut()
+        .find(|watchtower| watchtower.side == Side::White)
+        .unwrap();
+    let white_watchtower = (white_watchtower.i, white_watchtower.j);
+
+    let black_watchtower = q_watchtowers
+        .iter_mut()
+        .find(|watchtower| watchtower.side == Side::Black)
+        .unwrap();
+    let black_watchtower = (black_watchtower.i, black_watchtower.j);
+
     for click in er_click_square.read() {
-        let square_position = q_squares
-            .get_component::<Transform>(click.0)
-            .unwrap()
-            .translation;
+        let square = q_squares.get_component::<Square>(click.0).unwrap();
 
         let draught = q_draughts
             .iter()
@@ -233,6 +334,28 @@ fn move_draught(
 
         let draught_position = draught.1.translation;
         let draught_entity = draught.0;
+        let draught = draught.2;
+
+        let possible_moves = game_logic.legal_draught_moves(
+            turn_,
+            (draught.i, draught.j),
+            black_draughts,
+            white_draughts,
+            white_stones,
+            black_stones,
+            white_watchtower,
+            black_watchtower,
+        );
+
+        if !possible_moves.contains(&(square.i, square.j)) {
+            println!("Illegal move");
+            return;
+        }
+
+        let square_position = q_squares
+            .get_component::<Transform>(click.0)
+            .unwrap()
+            .translation;
 
         let tween = Tween::new(
             EaseFunction::QuadraticInOut,
@@ -243,7 +366,14 @@ fn move_draught(
             },
         );
 
-        commands.entity(draught_entity).insert(Animator::new(tween));
+        commands.entity(draught_entity).insert((
+            Animator::new(tween),
+            Draught {
+                i: square.i,
+                j: square.j,
+                ..*draught
+            },
+        ));
 
         selected_draught.n = None;
 
