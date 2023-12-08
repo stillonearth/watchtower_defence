@@ -49,7 +49,7 @@ struct GoPiece {
 struct Draught {
     pub i: usize,
     pub j: usize,
-    pub n: usize,
+    pub n: i8,
     pub side: Side,
 }
 
@@ -78,7 +78,14 @@ struct GameLogic {
 
 #[derive(Resource)]
 struct SelectedDraught {
-    n: Option<usize>,
+    n: Option<i8>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MoveType {
+    Regular,
+    DraughtTakeOver,
+    TowerTakeOver,
 }
 
 impl GameLogic {
@@ -121,22 +128,26 @@ impl GameLogic {
         black_stones: Vec<(usize, usize)>,
         white_tower: (usize, usize),
         black_tower: (usize, usize),
-    ) -> Vec<(usize, usize)> {
-        let ((our_draughts, our_stones, our_tower), (enemy_draughts, enemy_stones, enemy_tower)) =
-            match turn {
-                Turn::Black => (
-                    (black_draughts, black_stones, black_tower),
-                    (white_draughts, white_stones, white_tower),
-                ),
-                Turn::White => (
-                    (white_draughts, white_stones, white_tower),
-                    (black_draughts, black_stones, black_tower),
-                ),
-            };
+    ) -> (Vec<(usize, usize)>, Vec<MoveType>, Vec<(usize, usize)>) {
+        let (
+            (our_draughts, _our_stones, _our_tower),
+            (enemy_draughts, _enemy_stones, _enemy_tower),
+        ) = match turn {
+            Turn::Black => (
+                (black_draughts, black_stones, black_tower),
+                (white_draughts, white_stones, white_tower),
+            ),
+            Turn::White => (
+                (white_draughts, white_stones, white_tower),
+                (black_draughts, black_stones, black_tower),
+            ),
+        };
 
         let mut legal_moves: Vec<(usize, usize)> = Vec::new();
+        let mut takeovers: Vec<(usize, usize)> = Vec::new();
+        let mut legal_movetypes: Vec<MoveType> = Vec::new();
         let mut occupied_squares = our_draughts.clone();
-        occupied_squares.extend(enemy_draughts);
+        occupied_squares.extend(enemy_draughts.clone());
         // occupied_squares.extend(our_stones);
         // occupied_squares.extend(enemy_stones);
 
@@ -144,6 +155,8 @@ impl GameLogic {
         let up = (draught.0, draught.1 + 1);
         if up.1 < BOARD_SIZE && !occupied_squares.contains(&up) {
             legal_moves.push(up);
+            takeovers.push((0, 0));
+            legal_movetypes.push(MoveType::Regular);
         }
 
         // move down
@@ -151,6 +164,8 @@ impl GameLogic {
             let down = (draught.0, draught.1 - 1);
             if !occupied_squares.contains(&down) {
                 legal_moves.push(down);
+                takeovers.push((0, 0));
+                legal_movetypes.push(MoveType::Regular);
             }
         }
 
@@ -159,6 +174,8 @@ impl GameLogic {
             let left = (draught.0 - 1, draught.1);
             if !occupied_squares.contains(&left) {
                 legal_moves.push(left);
+                takeovers.push((0, 0));
+                legal_movetypes.push(MoveType::Regular);
             }
         }
 
@@ -166,6 +183,8 @@ impl GameLogic {
         let right = (draught.0 + 1, draught.1);
         if right.0 < BOARD_SIZE && !occupied_squares.contains(&right) {
             legal_moves.push(right);
+            takeovers.push((0, 0));
+            legal_movetypes.push(MoveType::Regular);
         }
 
         // move up left
@@ -173,6 +192,8 @@ impl GameLogic {
             let up_left = (draught.0 - 1, draught.1 + 1);
             if up_left.1 < BOARD_SIZE && !occupied_squares.contains(&up_left) {
                 legal_moves.push(up_left);
+                takeovers.push((0, 0));
+                legal_movetypes.push(MoveType::Regular);
             }
         }
 
@@ -183,6 +204,8 @@ impl GameLogic {
             && !occupied_squares.contains(&up_right)
         {
             legal_moves.push(up_right);
+            takeovers.push((0, 0));
+            legal_movetypes.push(MoveType::Regular);
         }
 
         // move down left
@@ -190,6 +213,8 @@ impl GameLogic {
             let down_left = (draught.0 - 1, draught.1 - 1);
             if !occupied_squares.contains(&down_left) {
                 legal_moves.push(down_left);
+                takeovers.push((0, 0));
+                legal_movetypes.push(MoveType::Regular);
             }
         }
 
@@ -198,10 +223,115 @@ impl GameLogic {
             let down_right = (draught.0 + 1, draught.1 - 1);
             if down_right.0 < BOARD_SIZE && !occupied_squares.contains(&down_right) {
                 legal_moves.push(down_right);
+                takeovers.push((0, 0));
+                legal_movetypes.push(MoveType::Regular);
             }
         }
 
-        return legal_moves;
+        // now, takeovers
+        // up
+        let up = (draught.0, draught.1 + 2);
+        let up_takeover = (draught.0, draught.1 + 1);
+        if up.1 < BOARD_SIZE
+            && enemy_draughts.contains(&up_takeover)
+            && !occupied_squares.contains(&up)
+        {
+            legal_moves.push(up);
+            takeovers.push(up_takeover);
+            legal_movetypes.push(MoveType::DraughtTakeOver);
+        }
+
+        // down
+        if draught.1 >= 2 {
+            let down = (draught.0, draught.1 - 2);
+            let down_takeover = (draught.0, draught.1 - 1);
+            if enemy_draughts.contains(&down_takeover) && !occupied_squares.contains(&down) {
+                legal_moves.push(down);
+                takeovers.push(down_takeover);
+                legal_movetypes.push(MoveType::DraughtTakeOver);
+            }
+        }
+
+        // left
+        if draught.0 >= 2 {
+            let left = (draught.0 - 2, draught.1);
+            let left_takeover = (draught.0 - 1, draught.1);
+            if enemy_draughts.contains(&left_takeover) && !occupied_squares.contains(&left) {
+                {
+                    legal_moves.push(left);
+                    takeovers.push(left_takeover);
+                    legal_movetypes.push(MoveType::DraughtTakeOver);
+                }
+            }
+        }
+
+        // right
+        let right = (draught.0 + 2, draught.1);
+        let right_takeover: (usize, usize) = (draught.0 + 1, draught.1);
+        if right.0 < BOARD_SIZE
+            && enemy_draughts.contains(&right_takeover)
+            && !occupied_squares.contains(&right)
+        {
+            legal_moves.push(right);
+            takeovers.push(right_takeover);
+            legal_movetypes.push(MoveType::DraughtTakeOver);
+        }
+
+        // up-right
+        let up_right = (draught.0 + 2, draught.1 + 2);
+        let up_right_takeover = (draught.0 + 1, draught.1 + 1);
+        if up_right.0 < BOARD_SIZE
+            && up_right.1 < BOARD_SIZE
+            && enemy_draughts.contains(&up_right_takeover)
+            && !occupied_squares.contains(&up_right)
+        {
+            legal_moves.push(up_right);
+            takeovers.push(up_right_takeover);
+            legal_movetypes.push(MoveType::DraughtTakeOver);
+        }
+
+        // up-left
+        if draught.0 >= 2 {
+            let up_left = (draught.0 - 2, draught.1 + 2);
+            let up_left_takeover = (draught.0 - 1, draught.1 + 1);
+            if up_left.1 < BOARD_SIZE
+                && enemy_draughts.contains(&up_left_takeover)
+                && !occupied_squares.contains(&up_left)
+            {
+                legal_moves.push(up_left);
+                takeovers.push(up_left_takeover);
+                legal_movetypes.push(MoveType::DraughtTakeOver);
+            }
+        }
+
+        // down-right
+        if draught.1 >= 2 {
+            let down_right = (draught.0 + 2, draught.1 - 2);
+            let down_right_takeover = (draught.0 + 1, draught.1 - 1);
+            if down_right.0 < BOARD_SIZE
+                && enemy_draughts.contains(&down_right_takeover)
+                && !occupied_squares.contains(&down_right)
+            {
+                legal_moves.push(down_right);
+                takeovers.push(down_right_takeover);
+                legal_movetypes.push(MoveType::DraughtTakeOver);
+            }
+        }
+
+        // down-left
+        if draught.0 >= 2 && draught.1 >= 2 {
+            let down_left = (draught.0 - 2, draught.1 - 2);
+            let down_left_takeover = (draught.0 - 1, draught.1 - 1);
+            if enemy_draughts.contains(&down_left_takeover)
+                && !occupied_squares.contains(&down_left)
+            {
+                legal_moves.push(down_left);
+                takeovers.push(down_left_takeover);
+                legal_movetypes.push(MoveType::DraughtTakeOver);
+            }
+        }
+
+        (legal_moves, legal_movetypes, takeovers)
     }
 }
 
@@ -277,6 +407,8 @@ fn move_draught(
     mut turn: ResMut<Turn>,
     mut game_logic: ResMut<GameLogic>,
     mut game_phase: ResMut<NextState<GamePhase>>,
+    materials: Res<MaterialAssets>,
+    meshes: Res<MeshAssets>,
 ) {
     if selected_draught.n.is_none() {
         return;
@@ -336,7 +468,7 @@ fn move_draught(
         let draught_entity = draught.0;
         let draught = draught.2;
 
-        let possible_moves = game_logic.legal_draught_moves(
+        let (possible_moves, possible_movetypes, takeovers) = game_logic.legal_draught_moves(
             turn_,
             (draught.i, draught.j),
             black_draughts,
@@ -350,6 +482,51 @@ fn move_draught(
         if !possible_moves.contains(&(square.i, square.j)) {
             println!("Illegal move");
             return;
+        }
+
+        let possible_move_index = possible_moves
+            .iter()
+            .position(|(i, j)| *i == square.i && *j == square.j)
+            .unwrap();
+        let move_type = possible_movetypes[possible_move_index];
+
+        if move_type == MoveType::DraughtTakeOver {
+            let takeover = takeovers[possible_move_index];
+            let enemy_draught = q_draughts
+                .iter()
+                .find(|d| d.2.i == takeover.0 && d.2.j == takeover.1)
+                .unwrap();
+
+            let enemy_draught_entity = enemy_draught.0;
+            let enemy_draught = enemy_draught.2;
+            let n_draughts = q_draughts.iter().filter(|d| d.2.side == side).count();
+
+            commands.entity(enemy_draught_entity).despawn_recursive();
+
+            let transform =
+                Transform::from_xyz(enemy_draught.i as f32, 0.0, enemy_draught.j as f32)
+                    .with_scale(Vec3::splat(0.1));
+            let draught = Draught {
+                i: enemy_draught.i,
+                j: enemy_draught.j,
+                n: (n_draughts + 1) as i8,
+                side,
+            };
+
+            commands.spawn((
+                PbrBundle {
+                    mesh: meshes.checkers_piece.clone(),
+                    transform,
+                    material: match side {
+                        Side::Black => materials.black.clone(),
+                        _ => materials.white.clone(),
+                    },
+                    ..default()
+                },
+                Name::new("Draught"),
+                draught,
+                On::<Pointer<Click>>::send_event::<EventClickDraught>(),
+            ));
         }
 
         let square_position = q_squares
