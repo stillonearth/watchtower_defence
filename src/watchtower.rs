@@ -5,6 +5,7 @@ use std::time::Duration;
 use crate::loading::{MaterialAssets, MeshAssets};
 use crate::GameState;
 use bevy::prelude::*;
+use bevy::transform::commands;
 use bevy_mod_picking::prelude::*;
 use bevy_tweening::*;
 
@@ -948,12 +949,180 @@ impl GameLogic {
     }
 }
 
+fn check_game_termination(
+    // mut q_draughts: Query<(Entity, &mut Draught)>,
+    // mut q_stones: Query<(Entity, &Stone)>,
+    mut q_watchtowers: Query<(Entity, &Watchtower)>,
+    // mut selected_draught: ResMut<SelectedDraught>,
+    // mut q_nuke_draught_button: Query<(Entity, &mut Visibility, &ButtonNukeDraught)>,
+    mut text_query: Query<(&mut Text, &mut Visibility, &NextMoveText)>,
+    game_phase: Res<State<GamePhase>>,
+) {
+    let game_phase = game_phase.into_inner();
+    let game_phase = game_phase.get();
+    if (*game_phase == GamePhase::Initialize
+        || *game_phase == GamePhase::PlaceWatchtower
+        || *game_phase == GamePhase::TriggerPlaceWatchtower)
+    {
+        return;
+    }
+
+    let n_white_towers = q_watchtowers
+        .iter()
+        .filter(|(_, w)| w.side == Side::White)
+        .count();
+
+    let n_black_towers = q_watchtowers
+        .iter()
+        .filter(|(_, w)| w.side == Side::Black)
+        .count();
+
+    let mut gameover_text = "";
+
+    if n_white_towers == 0 {
+        gameover_text = "Black Won!"
+    }
+
+    if n_black_towers == 0 {
+        gameover_text = "White Won!"
+    }
+
+    for (mut text, mut v, _tag) in text_query.iter_mut() {
+        text.sections[0].value = gameover_text.into();
+        *v = Visibility::Visible;
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn nuke_draught_button_system(
+    mut commands: Commands,
+    mut interaction_query: Query<
+        (&ButtonNukeDraught, &Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut q_draughts: Query<(Entity, &mut Draught)>,
+    mut q_stones: Query<(Entity, &Stone)>,
+    mut q_watchtowers: Query<(Entity, &Watchtower)>,
+    mut selected_draught: ResMut<SelectedDraught>,
+    mut q_nuke_draught_button: Query<(Entity, &mut Visibility, &ButtonNukeDraught)>,
+    turn: Res<Turn>,
+) {
+    let side = match *turn.into_inner() {
+        Turn::Black => Side::Black,
+        Turn::White => Side::White,
+    };
+
+    for (_, interaction, mut color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                let draught = q_draughts
+                    .iter()
+                    .find(|d| d.1.n == selected_draught.n.unwrap() && d.1.side == side)
+                    .unwrap()
+                    .1;
+
+                let ccs_to_remove: Vec<(i32, i32)> = vec![
+                    (draught.i as i32 - 1, draught.j as i32 - 1),
+                    (draught.i as i32 - 1, draught.j as i32),
+                    (draught.i as i32 - 1, draught.j as i32 + 1),
+                    (draught.i as i32, draught.j as i32 - 1),
+                    (draught.i as i32, draught.j as i32),
+                    (draught.i as i32, draught.j as i32 + 1),
+                    (draught.i as i32 + 1, draught.j as i32 - 1),
+                    (draught.i as i32 + 1, draught.j as i32),
+                    (draught.i as i32 + 1, draught.j as i32 + 1),
+                ];
+
+                let ccs_to_remove: Vec<_> = ccs_to_remove
+                    .iter()
+                    .filter(|(i, j)| *i >= 0 && *j >= 0)
+                    .collect();
+
+                for (e, d) in q_draughts.iter() {
+                    for cc in ccs_to_remove.iter() {
+                        if d.i as i32 == cc.0.clone() && d.j as i32 == cc.1.clone() {
+                            commands.entity(e).despawn_recursive();
+                        }
+                    }
+                }
+
+                for (e, d) in q_stones.iter() {
+                    for cc in ccs_to_remove.iter() {
+                        if d.i as i32 == cc.0.clone() && d.j as i32 == cc.1.clone() {
+                            commands.entity(e).despawn_recursive();
+                        }
+                    }
+                }
+
+                for (e, d) in q_watchtowers.iter() {
+                    for cc in ccs_to_remove.iter() {
+                        if d.i as i32 == cc.0.clone() && d.j as i32 == cc.1.clone() {
+                            commands.entity(e).despawn_recursive();
+                        }
+                    }
+                }
+
+                selected_draught.n = None;
+
+                for (_, mut v, _) in q_nuke_draught_button.iter_mut() {
+                    *v = Visibility::Hidden;
+                }
+
+                *color = PRESSED_BUTTON.into();
+            }
+            Interaction::Hovered => {
+                *color = HOVERED_BUTTON.into();
+            }
+            Interaction::None => {
+                *color = NORMAL_BUTTON.into();
+            }
+        }
+    }
+}
+
+fn init_game_over_text(mut commands: Commands) {
+    let text = Text::from_section(
+        "GAME OVER",
+        TextStyle {
+            font_size: 50.0,
+            color: Color::WHITE,
+            ..default()
+        },
+    )
+    .with_alignment(TextAlignment::Left);
+
+    // root node
+    commands
+        .spawn((NodeBundle {
+            style: Style {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(50.),
+                bottom: Val::Percent(50.),
+                ..Default::default()
+            },
+            ..Default::default()
+        },))
+        .with_children(|parent| {
+            parent
+                .spawn(TextBundle {
+                    text,
+                    ..Default::default()
+                })
+                .insert((NextMoveText, Visibility::Hidden));
+        })
+        .insert(Pickable::IGNORE);
+}
+
 impl Plugin for WatchtowerPlugin {
     fn build(&self, app: &mut App) {
         app.add_state::<GamePhase>();
         app.init_resource::<Turn>();
         app.add_plugins(TweeningPlugin)
             .add_plugins(DefaultPickingPlugins)
+            .add_systems(Startup, init_buttons)
+            .add_systems(Update, nuke_draught_button_system)
+            .add_systems(Update, init_game_over_text)
+            .add_systems(Update, check_game_termination)
             .add_systems(OnEnter(GameState::Watchtower), (spawn_camera, spawn_board))
             .add_systems(OnEnter(GamePhase::PlaceWatchtower), spawn_watchtower)
             .add_systems(
@@ -986,14 +1155,86 @@ impl Plugin for WatchtowerPlugin {
     }
 }
 
+// ---
+// UI
+
+const NORMAL_BUTTON: Color = Color::rgb(0.15, 0.15, 0.35);
+const HOVERED_BUTTON: Color = Color::rgb(0.25, 0.25, 0.25);
+const PRESSED_BUTTON: Color = Color::rgb(0.35, 0.75, 0.35);
+
+#[derive(Component)]
+struct NextMoveText;
+
+#[derive(Component)]
+struct ButtonNukeDraught;
+
+#[derive(Component)]
+struct GameOverText;
+
+fn init_buttons(mut commands: Commands) {
+    commands
+        .spawn((
+            ButtonBundle {
+                style: Style {
+                    width: Val::Px(170.0),
+                    height: Val::Px(65.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..Default::default()
+                },
+                background_color: NORMAL_BUTTON.into(),
+                visibility: Visibility::Hidden,
+                ..Default::default()
+            },
+            ButtonNukeDraught,
+            // Visibility::Hidden,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                TextBundle {
+                    text: Text::from_section(
+                        "Nuke the Draught",
+                        TextStyle {
+                            font_size: 30.0,
+                            color: Color::rgb(0.9, 0.9, 0.9),
+                            ..Default::default()
+                        },
+                    ),
+                    ..Default::default()
+                },
+                // Visibility::Hidden,
+            ));
+        })
+        .insert(Pickable::IGNORE);
+}
+
+// ---
+
 fn select_draught(
     mut er_click_draught: EventReader<EventClickDraught>,
     q_draughts: Query<(Entity, &mut Draught)>,
     mut selected_draught: ResMut<SelectedDraught>,
+    mut q_nuke_draught_button: Query<(Entity, &mut Visibility, &ButtonNukeDraught)>,
+    turn: Res<Turn>,
 ) {
+    let side = match *turn.into_inner() {
+        Turn::Black => Side::Black,
+        Turn::White => Side::White,
+    };
+
     for click in er_click_draught.read() {
         let draught = q_draughts.get_component::<Draught>(click.0).unwrap();
+
+        if draught.side != side {
+            return;
+        }
+
         selected_draught.n = Some(draught.n);
+
+        for (_, mut v, _) in q_nuke_draught_button.iter_mut() {
+            *v = Visibility::Visible;
+            break;
+        }
     }
 }
 
@@ -1028,6 +1269,8 @@ fn move_draught(
     mut game_phase: ResMut<NextState<GamePhase>>,
     materials: Res<MaterialAssets>,
     meshes: Res<MeshAssets>,
+
+    mut q_nuke_draught_button: Query<(Entity, &mut Visibility, &ButtonNukeDraught)>,
 ) {
     if selected_draught.n.is_none() {
         return;
@@ -1172,6 +1415,10 @@ fn move_draught(
         ));
 
         selected_draught.n = None;
+
+        for (_, mut v, _) in q_nuke_draught_button.iter_mut() {
+            *v = Visibility::Hidden;
+        }
 
         game_logic.log(GamePhase::MoveDraught, *turn);
         let (next_phase, next_turn) = game_logic.next_state();
