@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::ops::Index;
 use std::time::Duration;
 
 use crate::loading::{MaterialAssets, MeshAssets};
@@ -155,8 +156,6 @@ impl GameLogic {
         // ---
 
         while let Some((i, j)) = stack.pop() {
-            
-
             if visited_points.contains(&(i, j)) {
                 continue;
             }
@@ -199,22 +198,29 @@ impl GameLogic {
         if !(reached_bottom && reached_left && reached_right && reached_top) {
             return region_
                 .iter()
-                .filter(|e| !hack_elements.clone().contains(e)).copied()
+                .filter(|e| !hack_elements.clone().contains(e))
+                .copied()
                 .collect();
         }
 
         region
     }
 
-    fn fill_region(&self, region: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+    fn fill_region(&self, region: Vec<(usize, usize)>) -> (Vec<(usize, usize)>, bool) {
         let mut region = region.clone();
+        let mut is_expanded = false;
         for i in 0..BOARD_SIZE {
             for j in 0..BOARD_SIZE {
-                region = self.expand_from((i, j), region.clone());
+                let expanded_region = self.expand_from((i, j), region.clone());
+
+                if expanded_region.len() > region.len() {
+                    region = expanded_region;
+                    is_expanded = true;
+                }
             }
         }
 
-        region
+        (region, is_expanded)
     }
 
     fn find_region(
@@ -232,7 +238,6 @@ impl GameLogic {
         let mut visited = visited.clone();
 
         while let Some((i, j)) = stack.pop() {
-            
             if visited.contains(&(i, j)) {
                 continue;
             }
@@ -313,7 +318,10 @@ impl GameLogic {
 
         // fill gaps within region
 
-        let filled_region = self.fill_region(region.clone());
+        let (filled_region, is_expanded) = self.fill_region(region.clone());
+        if !is_expanded {
+            return (None, visited);
+        }
 
         // remove duplicates
         let filled_region: HashSet<(usize, usize)> = filled_region
@@ -388,12 +396,12 @@ impl GameLogic {
             (enemy_draughts, _enemy_stones, _enemy_tower),
         ) = match turn {
             Turn::Black => (
-                (black_draughts, black_stones, black_tower),
-                (white_draughts, white_stones, white_tower),
+                (black_draughts.clone(), black_stones.clone(), black_tower),
+                (white_draughts.clone(), white_stones.clone(), white_tower),
             ),
             Turn::White => (
-                (white_draughts, white_stones, white_tower),
-                (black_draughts, black_stones, black_tower),
+                (white_draughts.clone(), white_stones.clone(), white_tower),
+                (black_draughts.clone(), black_stones.clone(), black_tower),
             ),
         };
 
@@ -405,9 +413,42 @@ impl GameLogic {
         // occupied_squares.extend(our_stones);
         // occupied_squares.extend(enemy_stones);
 
+        let opposite_stones = self.legal_go_moves(
+            match turn {
+                Turn::Black => Turn::White,
+                Turn::White => Turn::Black,
+            },
+            black_draughts.clone(),
+            white_draughts.clone(),
+            white_stones.clone(),
+            black_stones.clone(),
+            white_tower,
+            black_tower,
+        );
+
+        let enemy_stones = match turn {
+            Turn::Black => white_stones.clone(),
+            Turn::White => black_stones.clone(),
+        };
+
+        let mut opposite_occupied_squares: Vec<(usize, usize)> = Vec::new();
+        for region in opposite_stones.iter() {
+            opposite_occupied_squares.extend(region);
+        }
+        // opposite_occupied_squares.extend(enemy_stones);
+        // keep only unique elements
+        opposite_occupied_squares = opposite_occupied_squares
+            .into_iter()
+            .collect::<HashSet<(usize, usize)>>()
+            .into_iter()
+            .collect();
+
         // move up
         let up = (draught.0, draught.1 + 1);
-        if up.1 < BOARD_SIZE && !occupied_squares.contains(&up) {
+        if up.1 < BOARD_SIZE
+            && !occupied_squares.contains(&up)
+            && !opposite_occupied_squares.contains(&up)
+        {
             legal_moves.push(up);
             takeovers.push((0, 0));
             legal_movetypes.push(CheckersMoveType::Regular);
@@ -416,7 +457,7 @@ impl GameLogic {
         // move down
         if draught.1 >= 1 {
             let down = (draught.0, draught.1 - 1);
-            if !occupied_squares.contains(&down) {
+            if !occupied_squares.contains(&down) && !opposite_occupied_squares.contains(&down) {
                 legal_moves.push(down);
                 takeovers.push((0, 0));
                 legal_movetypes.push(CheckersMoveType::Regular);
@@ -426,7 +467,7 @@ impl GameLogic {
         // move left
         if draught.0 >= 1 {
             let left = (draught.0 - 1, draught.1);
-            if !occupied_squares.contains(&left) {
+            if !occupied_squares.contains(&left) && !opposite_occupied_squares.contains(&left) {
                 legal_moves.push(left);
                 takeovers.push((0, 0));
                 legal_movetypes.push(CheckersMoveType::Regular);
@@ -435,7 +476,10 @@ impl GameLogic {
 
         // move right
         let right = (draught.0 + 1, draught.1);
-        if right.0 < BOARD_SIZE && !occupied_squares.contains(&right) {
+        if right.0 < BOARD_SIZE
+            && !occupied_squares.contains(&right)
+            && !opposite_occupied_squares.contains(&right)
+        {
             legal_moves.push(right);
             takeovers.push((0, 0));
             legal_movetypes.push(CheckersMoveType::Regular);
@@ -444,7 +488,10 @@ impl GameLogic {
         // move up left
         if draught.0 >= 1 {
             let up_left = (draught.0 - 1, draught.1 + 1);
-            if up_left.1 < BOARD_SIZE && !occupied_squares.contains(&up_left) {
+            if up_left.1 < BOARD_SIZE
+                && !occupied_squares.contains(&up_left)
+                && !opposite_occupied_squares.contains(&up_left)
+            {
                 legal_moves.push(up_left);
                 takeovers.push((0, 0));
                 legal_movetypes.push(CheckersMoveType::Regular);
@@ -456,6 +503,7 @@ impl GameLogic {
         if up_right.0 < BOARD_SIZE
             && up_right.1 < BOARD_SIZE
             && !occupied_squares.contains(&up_right)
+            && !opposite_occupied_squares.contains(&up_right)
         {
             legal_moves.push(up_right);
             takeovers.push((0, 0));
@@ -465,7 +513,9 @@ impl GameLogic {
         // move down left
         if draught.0 >= 1 && draught.1 >= 1 {
             let down_left = (draught.0 - 1, draught.1 - 1);
-            if !occupied_squares.contains(&down_left) {
+            if !occupied_squares.contains(&down_left)
+                && !opposite_occupied_squares.contains(&down_left)
+            {
                 legal_moves.push(down_left);
                 takeovers.push((0, 0));
                 legal_movetypes.push(CheckersMoveType::Regular);
@@ -475,7 +525,10 @@ impl GameLogic {
         // move down right
         if draught.1 >= 1 {
             let down_right = (draught.0 + 1, draught.1 - 1);
-            if down_right.0 < BOARD_SIZE && !occupied_squares.contains(&down_right) {
+            if down_right.0 < BOARD_SIZE
+                && !occupied_squares.contains(&down_right)
+                && !opposite_occupied_squares.contains(&down_right)
+            {
                 legal_moves.push(down_right);
                 takeovers.push((0, 0));
                 legal_movetypes.push(CheckersMoveType::Regular);
@@ -489,6 +542,7 @@ impl GameLogic {
         if up.1 < BOARD_SIZE
             && enemy_draughts.contains(&up_takeover)
             && !occupied_squares.contains(&up)
+            && !opposite_occupied_squares.contains(&up)
         {
             legal_moves.push(up);
             takeovers.push(up_takeover);
@@ -499,7 +553,10 @@ impl GameLogic {
         if draught.1 >= 2 {
             let down = (draught.0, draught.1 - 2);
             let down_takeover = (draught.0, draught.1 - 1);
-            if enemy_draughts.contains(&down_takeover) && !occupied_squares.contains(&down) {
+            if enemy_draughts.contains(&down_takeover)
+                && !occupied_squares.contains(&down)
+                && !opposite_occupied_squares.contains(&down)
+            {
                 legal_moves.push(down);
                 takeovers.push(down_takeover);
                 legal_movetypes.push(CheckersMoveType::DraughtTakeOver);
@@ -510,7 +567,10 @@ impl GameLogic {
         if draught.0 >= 2 {
             let left = (draught.0 - 2, draught.1);
             let left_takeover = (draught.0 - 1, draught.1);
-            if enemy_draughts.contains(&left_takeover) && !occupied_squares.contains(&left) {
+            if enemy_draughts.contains(&left_takeover)
+                && !occupied_squares.contains(&left)
+                && !opposite_occupied_squares.contains(&left)
+            {
                 {
                     legal_moves.push(left);
                     takeovers.push(left_takeover);
@@ -525,6 +585,7 @@ impl GameLogic {
         if right.0 < BOARD_SIZE
             && enemy_draughts.contains(&right_takeover)
             && !occupied_squares.contains(&right)
+            && !opposite_occupied_squares.contains(&right)
         {
             legal_moves.push(right);
             takeovers.push(right_takeover);
@@ -538,6 +599,8 @@ impl GameLogic {
             && up_right.1 < BOARD_SIZE
             && enemy_draughts.contains(&up_right_takeover)
             && !occupied_squares.contains(&up_right)
+            && !opposite_occupied_squares.contains(&up_right)
+            && !opposite_occupied_squares.contains(&(up_right.0, up_right.1))
         {
             legal_moves.push(up_right);
             takeovers.push(up_right_takeover);
@@ -551,6 +614,7 @@ impl GameLogic {
             if up_left.1 < BOARD_SIZE
                 && enemy_draughts.contains(&up_left_takeover)
                 && !occupied_squares.contains(&up_left)
+                && !opposite_occupied_squares.contains(&up_left)
             {
                 legal_moves.push(up_left);
                 takeovers.push(up_left_takeover);
@@ -565,6 +629,7 @@ impl GameLogic {
             if down_right.0 < BOARD_SIZE
                 && enemy_draughts.contains(&down_right_takeover)
                 && !occupied_squares.contains(&down_right)
+                && !opposite_occupied_squares.contains(&down_right)
             {
                 legal_moves.push(down_right);
                 takeovers.push(down_right_takeover);
@@ -578,12 +643,306 @@ impl GameLogic {
             let down_left_takeover = (draught.0 - 1, draught.1 - 1);
             if enemy_draughts.contains(&down_left_takeover)
                 && !occupied_squares.contains(&down_left)
+                && !opposite_occupied_squares.contains(&down_left)
             {
                 legal_moves.push(down_left);
                 takeovers.push(down_left_takeover);
                 legal_movetypes.push(CheckersMoveType::DraughtTakeOver);
             }
         }
+
+        let is_two_above = enemy_stones
+            .iter()
+            .position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 && j == draught.1 - 1
+            })
+            .is_some()
+            && enemy_stones
+                .iter()
+                .position(|(i, j)| {
+                    let (i, j) = (*i, *j);
+                    i == draught.0 - 1 && j == draught.1 - 1
+                })
+                .is_some();
+        // remove lower-right
+        if is_two_above {
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 + 1 && j == draught.1 - 1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 && j == draught.1 - 1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 - 1 && j == draught.1 - 1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+        }
+
+        let is_two_below = enemy_stones
+            .iter()
+            .position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 && j == draught.1
+            })
+            .is_some()
+            && enemy_stones
+                .iter()
+                .position(|(i, j)| {
+                    let (i, j) = (*i, *j);
+                    i == draught.0 - 1 && j == draught.1
+                })
+                .is_some();
+        // remove lower-right
+        if is_two_below {
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 - 1 && j == draught.1 + 1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 && j == draught.1 + 1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 + 1 && j == draught.1 + 1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+        }
+
+        let is_two_left = enemy_stones
+            .iter()
+            .position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 - 1 && j == draught.1 - 1
+            })
+            .is_some()
+            && enemy_stones
+                .iter()
+                .position(|(i, j)| {
+                    let (i, j) = (*i, *j);
+                    i == draught.0 - 1 && j == draught.1
+                })
+                .is_some();
+        // remove lower-right
+        if is_two_left {
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 - 1 && j == draught.1 - 1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 - 1 && j == draught.1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 - 1 && j == draught.1 + 1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+        }
+
+        let is_two_right = enemy_stones
+            .iter()
+            .position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 && j == draught.1
+            })
+            .is_some()
+            && enemy_stones
+                .iter()
+                .position(|(i, j)| {
+                    let (i, j) = (*i, *j);
+                    i == draught.0 && j == draught.1 - 1
+                })
+                .is_some();
+        // remove lower-right
+        if is_two_right {
+            println!("is_two_right");
+
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 + 1 && j == draught.1 - 1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 + 1 && j == draught.1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 + 1 && j == draught.1 + 1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+        }
+
+        let is_one_above_right = enemy_stones
+            .iter()
+            .position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 && (j + 1) == draught.1
+            })
+            .is_some();
+        // remove lower-right
+        if is_one_above_right {
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i - 1 == draught.0 && j + 1 == draught.1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+        }
+
+        let is_one_above_left = enemy_stones
+            .iter()
+            .position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                (i + 1) == draught.0 && (j + 1) == draught.1
+            })
+            .is_some();
+        // remove lower-right
+        if is_one_above_left {
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 - 1 && j == draught.1 - 1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+        }
+
+        let is_one_below_left = enemy_stones
+            .iter()
+            .position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 - 1 && j == draught.1
+            })
+            .is_some();
+        // remove lower-right
+        if is_one_below_left {
+            println!("is_one_below_left");
+
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 - 1 && j == draught.1 + 1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+        }
+
+        let is_one_below_right = enemy_stones
+            .iter()
+            .position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 && j == draught.1
+            })
+            .is_some();
+        // remove lower-right
+        if is_one_below_right {
+            println!("is_one_below_right");
+
+            let index = legal_moves.iter().position(|(i, j)| {
+                let (i, j) = (*i, *j);
+                i == draught.0 + 1 && j == draught.1 + 1
+            });
+            if index.is_some() {
+                legal_moves.remove(index.unwrap());
+                takeovers.remove(index.unwrap());
+                legal_movetypes.remove(index.unwrap());
+            }
+        }
+
+        // let is_stone_on_draught_place = opposite_occupied_squares.iter().position(|(i, j)| {
+        //     let (i, j) = (*i, *j);
+        //     i == draught.0 && j == draught.1
+        // });
+        // if is_stone_on_draught_place.is_some() {
+        //     let illegal_moves: Vec<(usize, usize)> = vec![(1, 1)];
+        //     for im in illegal_moves.iter() {
+        //         let index = legal_moves.iter().position(|(i, j)| {
+        //             let (i, j) = (*i, *j);
+        //             i == im.0 && j == im.1
+        //         });
+        //         if index.is_some() {
+        //             legal_moves.remove(index.unwrap());
+        //             takeovers.remove(index.unwrap());
+        //             legal_movetypes.remove(index.unwrap());
+        //         }
+        //     }
+        // }
 
         (legal_moves, legal_movetypes, takeovers)
     }
@@ -1010,8 +1369,8 @@ fn place_stone(
     mut game_phase: ResMut<NextState<GamePhase>>,
     mut game_logic: ResMut<GameLogic>,
     mut q_draughts: Query<(Entity, &mut Transform, &mut Draught)>,
-    mut q_stones: Query<&Stone>,
-    mut q_watchtowers: Query<&Watchtower>,
+    mut q_stones: Query<(Entity, &Stone)>,
+    mut q_watchtowers: Query<(Entity, &Watchtower)>,
     mut q_debug_squares: Query<Entity, With<DebugSquare>>,
 ) {
     let black_draughts = q_draughts
@@ -1028,27 +1387,27 @@ fn place_stone(
 
     let mut black_stones = q_stones
         .iter_mut()
-        .filter(|go_piece| go_piece.side == Side::Black)
-        .map(|go_piece| (go_piece.i, go_piece.j))
+        .filter(|(_, go_piece)| go_piece.side == Side::Black)
+        .map(|go_piece| (go_piece.1.i, go_piece.1.j))
         .collect::<Vec<(usize, usize)>>();
 
     let mut white_stones = q_stones
         .iter_mut()
-        .filter(|go_piece| go_piece.side == Side::White)
-        .map(|go_piece| (go_piece.i, go_piece.j))
+        .filter(|(_, go_piece)| go_piece.side == Side::White)
+        .map(|go_piece| (go_piece.1.i, go_piece.1.j))
         .collect::<Vec<(usize, usize)>>();
 
     let white_watchtower = q_watchtowers
         .iter_mut()
-        .find(|watchtower| watchtower.side == Side::White)
+        .find(|(_, watchtower)| watchtower.side == Side::White)
         .unwrap();
-    let white_watchtower = (white_watchtower.i, white_watchtower.j);
+    let white_watchtower = (white_watchtower.1.i, white_watchtower.1.j);
 
     let black_watchtower = q_watchtowers
         .iter_mut()
-        .find(|watchtower| watchtower.side == Side::Black)
+        .find(|(_, watchtower)| watchtower.side == Side::Black)
         .unwrap();
-    let black_watchtower = (black_watchtower.i, black_watchtower.j);
+    let black_watchtower = (black_watchtower.1.i, black_watchtower.1.j);
 
     let turn_ = *turn;
     let side = match turn_ {
@@ -1088,10 +1447,10 @@ fn place_stone(
 
         let convex_sets = game_logic.legal_go_moves(
             turn_,
-            black_draughts,
-            white_draughts,
-            white_stones,
-            black_stones,
+            black_draughts.clone(),
+            white_draughts.clone(),
+            white_stones.clone(),
+            black_stones.clone(),
             white_watchtower,
             black_watchtower,
         );
@@ -1101,25 +1460,91 @@ fn place_stone(
             commands.entity(entity).despawn_recursive();
         }
 
-        println!("n_convex_sets: {}", convex_sets.len());
+        // remove opposite stones
+        let enemy_stones = match side {
+            Side::Black => white_stones.clone(),
+            Side::White => black_stones.clone(),
+        };
+
+        let enemy_draughts = match side {
+            Side::Black => white_draughts.clone(),
+            Side::White => black_draughts.clone(),
+        };
 
         for convex in convex_sets.iter() {
             for (i, j) in convex.iter() {
+                for enemy_stone in enemy_stones.iter() {
+                    if !(enemy_stone.0 == *i && enemy_stone.1 == *j) {
+                        continue;
+                    }
+
+                    let stone_entity = q_stones
+                        .iter()
+                        .find(|(_, stone)| (stone.i == enemy_stone.0 && stone.j == enemy_stone.1));
+                    if stone_entity.is_some() {
+                        let stone_entity = stone_entity.unwrap().0;
+                        commands.entity(stone_entity).despawn_recursive();
+                    }
+                }
+
+                // takeover pieces
+                for enemy_draught in enemy_draughts.iter() {
+                    if !(enemy_draught.0 == *i && enemy_draught.1 == *j) {
+                        continue;
+                    }
+
+                    let enemy_draught = q_draughts
+                        .iter()
+                        .find(|d| d.2.i == enemy_draught.0 && d.2.j == enemy_draught.1)
+                        .unwrap();
+
+                    let enemy_draught_entity = enemy_draught.0;
+                    let enemy_draught = enemy_draught.2;
+                    let n_draughts = q_draughts.iter().filter(|d| d.2.side == side).count();
+
+                    commands.entity(enemy_draught_entity).despawn_recursive();
+
+                    let transform =
+                        Transform::from_xyz(enemy_draught.i as f32, 0.0, enemy_draught.j as f32)
+                            .with_scale(Vec3::splat(0.1));
+                    let draught = Draught {
+                        i: enemy_draught.i,
+                        j: enemy_draught.j,
+                        n: (n_draughts + 1) as i8,
+                        side,
+                    };
+
+                    commands.spawn((
+                        PbrBundle {
+                            mesh: meshes.checkers_piece.clone(),
+                            transform,
+                            material: match side {
+                                Side::Black => materials.black.clone(),
+                                _ => materials.white.clone(),
+                            },
+                            ..default()
+                        },
+                        Name::new("Draught"),
+                        draught,
+                        On::<Pointer<Click>>::send_event::<EventClickDraught>(),
+                    ));
+                }
+
                 // spawn debug square
-                commands.spawn((
-                    PbrBundle {
-                        mesh: meshes.square_plane.clone(),
-                        material: materials.red.clone(),
-                        transform: Transform::from_translation(Vec3::new(
-                            *i as f32 + 0.5,
-                            0.0005,
-                            *j as f32 + 0.5,
-                        )),
-                        ..default()
-                    },
-                    Name::new("DebugSquare"),
-                    DebugSquare,
-                ));
+                // commands.spawn((
+                //     PbrBundle {
+                //         mesh: meshes.square_plane.clone(),
+                //         material: materials.red.clone(),
+                //         transform: Transform::from_translation(Vec3::new(
+                //             *i as f32 + 0.5,
+                //             0.0005,
+                //             *j as f32 + 0.5,
+                //         )),
+                //         ..default()
+                //     },
+                //     Name::new("DebugSquare"),
+                //     DebugSquare,
+                // ));
             }
         }
 
