@@ -125,6 +125,98 @@ impl GameLogic {
         }
     }
 
+    fn expand_from(
+        &self,
+        start: (usize, usize),
+        region: Vec<(usize, usize)>,
+    ) -> Vec<(usize, usize)> {
+        let mut visited_points: Vec<(usize, usize)> = vec![];
+        let mut stack: Vec<(usize, usize)> = vec![start];
+
+        let mut reached_top = false;
+        let mut reached_bottom = false;
+        let mut reached_left = false;
+        let mut reached_right = false;
+
+        let candidates: Vec<(i8, i8)> = vec![(-1, 0), (1, 0), (0, -1), (0, 1)];
+        let mut region_ = region.clone();
+
+        // this is a hack but i spent way too much time debugging this
+        let mut hack_elements: Vec<(usize, usize)> = Vec::new();
+        for i in 0..BOARD_SIZE {
+            hack_elements.push((i, BOARD_SIZE - 1));
+        }
+        for i in 0..BOARD_SIZE {
+            hack_elements.push((BOARD_SIZE - 1, i));
+        }
+        for e in hack_elements.clone() {
+            region_.push(e);
+        }
+        // ---
+
+        while let Some((i, j)) = stack.pop() {
+            
+
+            if visited_points.contains(&(i, j)) {
+                continue;
+            }
+
+            region_.push((i, j));
+            visited_points.push((i, j));
+
+            for c in candidates.clone() {
+                let candidate = (i as i8 + c.0, j as i8 + c.1);
+
+                if candidate.0 < 0
+                    || candidate.1 < 0
+                    || candidate.0 > BOARD_SIZE as i8
+                    || candidate.1 > BOARD_SIZE as i8
+                {
+                    continue;
+                }
+
+                let candidate = (candidate.0 as usize, candidate.1 as usize);
+
+                if candidate.0 == 0 {
+                    reached_left = true;
+                }
+                if candidate.0 == (BOARD_SIZE - 1) {
+                    reached_right = true;
+                }
+                if candidate.1 == 0 {
+                    reached_bottom = true;
+                }
+                if candidate.1 == (BOARD_SIZE - 1) {
+                    reached_top = true;
+                }
+
+                if !region_.contains(&candidate) {
+                    stack.push(candidate);
+                }
+            }
+        }
+
+        if !(reached_bottom && reached_left && reached_right && reached_top) {
+            return region_
+                .iter()
+                .filter(|e| !hack_elements.clone().contains(e)).copied()
+                .collect();
+        }
+
+        region
+    }
+
+    fn fill_region(&self, region: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+        let mut region = region.clone();
+        for i in 0..BOARD_SIZE {
+            for j in 0..BOARD_SIZE {
+                region = self.expand_from((i, j), region.clone());
+            }
+        }
+
+        region
+    }
+
     fn find_region(
         &self,
         start: (usize, usize),
@@ -139,8 +231,8 @@ impl GameLogic {
         let mut stack: Vec<(usize, usize)> = vec![start];
         let mut visited = visited.clone();
 
-        while !stack.is_empty() {
-            let (i, j) = stack.pop().unwrap();
+        while let Some((i, j)) = stack.pop() {
+            
             if visited.contains(&(i, j)) {
                 continue;
             }
@@ -219,26 +311,20 @@ impl GameLogic {
             return (None, visited);
         }
 
-        // find set of horizontal components of a region
-        let horizontal_components = region.iter().map(|(i, _)| *i).collect::<Vec<usize>>();
-        let horizontal_components: HashSet<usize> = horizontal_components.into_iter().collect();
-        let mut filled_region: Vec<(usize, usize)> = Vec::new();
-        for i in horizontal_components {
-            // find min and max j
-            let vertical_components = region
-                .iter()
-                .filter(|(i_, _)| *i_ == i)
-                .map(|(_, j)| *j)
-                .collect::<Vec<usize>>();
-            let min_j = *vertical_components.iter().min().unwrap();
-            let max_j = *vertical_components.iter().max().unwrap();
+        // fill gaps within region
 
-            for j in min_j..=max_j {
-                filled_region.push((i, j));
-            }
-        }
+        let filled_region = self.fill_region(region.clone());
 
-        return (Some(filled_region), visited);
+        // remove duplicates
+        let filled_region: HashSet<(usize, usize)> = filled_region
+            .into_iter()
+            .collect::<Vec<(usize, usize)>>()
+            .into_iter()
+            .collect();
+        // convert to vector
+        let filled_region: Vec<(usize, usize)> = filled_region.into_iter().collect();
+
+        (Some(filled_region), visited)
     }
 
     fn legal_go_moves(
@@ -253,7 +339,7 @@ impl GameLogic {
     ) -> Vec<Vec<(usize, usize)>> {
         let (
             (_our_draughts, our_stones, _our_tower),
-            (_enemy_draughts, enemy_stones, _enemy_tower),
+            (_enemy_draughts, _enemy_stones, _enemy_tower),
         ) = match turn {
             Turn::Black => (
                 (black_draughts, black_stones, black_tower),
@@ -279,7 +365,7 @@ impl GameLogic {
             }
         }
 
-        return convexes;
+        convexes
     }
 
     fn legal_draught_moves(
@@ -1139,7 +1225,7 @@ fn place_watchtower(
     materials: Res<MaterialAssets>,
     mut er_hover_square: EventReader<EventHoverSquare>,
     mut er_click_square: EventReader<EventClickSquare>,
-    mut er_click_watchtower: EventReader<EventClickWatchtower>,
+    _er_click_watchtower: EventReader<EventClickWatchtower>,
     q_squares: Query<Entity, &Square>,
     mut q_pieces: Query<(Entity, &mut Transform, &mut Draught)>,
     mut q_watchtower: Query<(Entity, &mut Transform, &mut Watchtower), Without<Draught>>,
