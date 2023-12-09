@@ -1,11 +1,11 @@
 use std::collections::HashSet;
-use std::ops::Index;
+
 use std::time::Duration;
 
 use crate::loading::{MaterialAssets, MeshAssets};
 use crate::GameState;
 use bevy::prelude::*;
-use bevy::transform::commands;
+
 use bevy_mod_picking::prelude::*;
 use bevy_tweening::*;
 
@@ -952,7 +952,7 @@ impl GameLogic {
 fn check_game_termination(
     // mut q_draughts: Query<(Entity, &mut Draught)>,
     // mut q_stones: Query<(Entity, &Stone)>,
-    mut q_watchtowers: Query<(Entity, &Watchtower)>,
+    q_watchtowers: Query<(Entity, &Watchtower)>,
     // mut selected_draught: ResMut<SelectedDraught>,
     // mut q_nuke_draught_button: Query<(Entity, &mut Visibility, &ButtonNukeDraught)>,
     mut text_query: Query<(&mut Text, &mut Visibility, &NextMoveText)>,
@@ -960,9 +960,9 @@ fn check_game_termination(
 ) {
     let game_phase = game_phase.into_inner();
     let game_phase = game_phase.get();
-    if (*game_phase == GamePhase::Initialize
+    if *game_phase == GamePhase::Initialize
         || *game_phase == GamePhase::PlaceWatchtower
-        || *game_phase == GamePhase::TriggerPlaceWatchtower)
+        || *game_phase == GamePhase::TriggerPlaceWatchtower
     {
         return;
     }
@@ -1000,9 +1000,9 @@ fn nuke_draught_button_system(
         (&ButtonNukeDraught, &Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<Button>),
     >,
-    mut q_draughts: Query<(Entity, &mut Draught)>,
-    mut q_stones: Query<(Entity, &Stone)>,
-    mut q_watchtowers: Query<(Entity, &Watchtower)>,
+    q_draughts: Query<(Entity, &mut Draught)>,
+    q_stones: Query<(Entity, &Stone)>,
+    q_watchtowers: Query<(Entity, &Watchtower)>,
     mut selected_draught: ResMut<SelectedDraught>,
     mut q_nuke_draught_button: Query<(Entity, &mut Visibility, &ButtonNukeDraught)>,
     turn: Res<Turn>,
@@ -1040,7 +1040,7 @@ fn nuke_draught_button_system(
 
                 for (e, d) in q_draughts.iter() {
                     for cc in ccs_to_remove.iter() {
-                        if d.i as i32 == cc.0.clone() && d.j as i32 == cc.1.clone() {
+                        if d.i as i32 == cc.0 && d.j as i32 == cc.1 {
                             commands.entity(e).despawn_recursive();
                         }
                     }
@@ -1048,7 +1048,7 @@ fn nuke_draught_button_system(
 
                 for (e, d) in q_stones.iter() {
                     for cc in ccs_to_remove.iter() {
-                        if d.i as i32 == cc.0.clone() && d.j as i32 == cc.1.clone() {
+                        if d.i as i32 == cc.0 && d.j as i32 == cc.1 {
                             commands.entity(e).despawn_recursive();
                         }
                     }
@@ -1056,7 +1056,7 @@ fn nuke_draught_button_system(
 
                 for (e, d) in q_watchtowers.iter() {
                     for cc in ccs_to_remove.iter() {
-                        if d.i as i32 == cc.0.clone() && d.j as i32 == cc.1.clone() {
+                        if d.i as i32 == cc.0 && d.j as i32 == cc.1 {
                             commands.entity(e).despawn_recursive();
                         }
                     }
