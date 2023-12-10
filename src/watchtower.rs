@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use crate::loading::{MaterialAssets, MeshAssets};
 use crate::GameState;
+use bevy::core_pipeline::clear_color;
 use bevy::prelude::*;
 
 use bevy_mod_picking::prelude::*;
@@ -66,6 +67,7 @@ enum GamePhase {
     TriggerPlaceWatchtower,
     PlaceGoPiece,
     MoveDraught,
+    GameOver,
 }
 
 #[derive(Resource, Default, Clone, Copy, Debug)]
@@ -229,9 +231,13 @@ impl GameLogic {
         start: (usize, usize),
         our_stones: Vec<(usize, usize)>,
         visited: Vec<(usize, usize)>,
-    ) -> (Option<Vec<(usize, usize)>>, Vec<(usize, usize)>) {
+    ) -> (
+        Option<Vec<(usize, usize)>>,
+        Vec<(usize, usize)>,
+        Vec<(usize, usize)>,
+    ) {
         if !our_stones.contains(&start) {
-            return (None, visited);
+            return (None, visited, vec![]);
         }
 
         let mut region: Vec<(usize, usize)> = vec![];
@@ -313,16 +319,16 @@ impl GameLogic {
             }
         }
 
-        if region.len() < 2 {
-            return (None, visited);
+        if region.len() < 3 {
+            return (None, visited, vec![]);
         }
 
         // fill gaps within region
 
         let (filled_region, is_expanded) = self.fill_region(region.clone());
-        if !is_expanded {
-            return (None, visited);
-        }
+        // if !is_expanded && region.len() > 4 {
+        //     return (None, visited);
+        // }
 
         // remove duplicates
         let filled_region: HashSet<(usize, usize)> = filled_region
@@ -331,9 +337,161 @@ impl GameLogic {
             .into_iter()
             .collect();
         // convert to vector
-        let filled_region: Vec<(usize, usize)> = filled_region.into_iter().collect();
+        let mut filled_region: Vec<(usize, usize)> = filled_region.into_iter().collect();
 
-        (Some(filled_region), visited)
+        let stone_annihilate_region = filled_region.clone();
+
+        // clean-up
+        let stone_exists = |set: Vec<(usize, usize)>, (i, j): (usize, usize)| -> bool {
+            set.iter()
+                .filter(|stone| stone.0 == i && stone.1 == j)
+                .count()
+                != 0
+        };
+
+        let mut clean_region: Vec<(usize, usize)> = Vec::new();
+
+        for i in 0..BOARD_SIZE {
+            for j in 0..BOARD_SIZE {
+                let stone = (i, j);
+
+                if !stone_exists(filled_region.clone(), stone) {
+                    continue;
+                }
+
+                if i == 0 || i == (BOARD_SIZE - 1) {
+                    clean_region.push(stone);
+                    continue;
+                }
+
+                let next_stone = (i + 1, j);
+                let prev_stone = (i - 1, j);
+
+                let has_next_stone = stone_exists(filled_region.clone(), next_stone);
+                let has_prev_stone = stone_exists(filled_region.clone(), prev_stone);
+                if has_next_stone || has_prev_stone {
+                    clean_region.push(stone);
+                }
+            }
+        }
+
+        filled_region = clean_region.clone();
+        let mut clean_region: Vec<(usize, usize)> = Vec::new();
+
+        for j in 0..BOARD_SIZE {
+            for i in 0..BOARD_SIZE {
+                let stone = (i, j);
+
+                if !stone_exists(filled_region.clone(), stone) {
+                    continue;
+                }
+
+                if i == 0 || i == (BOARD_SIZE - 1) {
+                    clean_region.push(stone);
+                    continue;
+                }
+
+                let next_stone = (i, j + 1);
+                let prev_stone = (i, j - 1);
+
+                let has_next_stone = stone_exists(filled_region.clone(), next_stone);
+                let has_prev_stone = stone_exists(filled_region.clone(), prev_stone);
+                if has_next_stone || has_prev_stone {
+                    clean_region.push(stone);
+                }
+            }
+        }
+
+        let floor_region: Vec<(i32, i32)> = clean_region
+            .iter()
+            .map(|(i, j)| (*i as f32 + 0.5, *j as f32 + 0.5))
+            .map(|(i, j)| (i.ceil() as i32, j.ceil() as i32))
+            .collect();
+
+        let ceil_region: Vec<(i32, i32)> = clean_region
+            .iter()
+            .map(|(i, j)| (*i as f32 + 0.5, *j as f32 + 0.5))
+            .map(|(i, j)| (i.floor() as i32, j.floor() as i32))
+            .collect();
+
+        let mut clean_region: Vec<(usize, usize)> = Vec::new();
+
+        let stone_exists = |set: Vec<(i32, i32)>, (i, j): (usize, usize)| -> bool {
+            set.iter()
+                .filter(|stone| stone.0 == i as i32 && stone.1 == j as i32)
+                .count()
+                != 0
+        };
+
+        for i in 0..BOARD_SIZE {
+            for j in 0..BOARD_SIZE {
+                let stone = (i, j);
+
+                if stone_exists(floor_region.clone(), stone)
+                    && stone_exists(ceil_region.clone(), stone)
+                {
+                    clean_region.push(stone);
+                }
+            }
+        }
+
+        let stone_exists = |set: Vec<(usize, usize)>, (i, j): (usize, usize)| -> bool {
+            set.iter()
+                .filter(|stone| stone.0 == i && stone.1 == j)
+                .count()
+                != 0
+        };
+
+        let mut super_clean_region: Vec<(usize, usize)> = Vec::new();
+
+        for i in 1..BOARD_SIZE {
+            for j in 1..BOARD_SIZE {
+                let stone = (i, j);
+                let previous_stone = (i - 1, j);
+
+                if !stone_exists(clean_region.clone(), previous_stone)
+                    && stone_exists(clean_region.clone(), stone)
+                {
+                    let stone_1 = (i - 1, j - 1);
+                    let stone_2 = (i - 1, j);
+
+                    if stone_exists(our_stones.clone(), stone_1)
+                        && stone_exists(our_stones.clone(), stone_2)
+                    {
+                        super_clean_region.push(stone);
+                    }
+                } else if stone_exists(clean_region.clone(), stone) {
+                    super_clean_region.push(stone);
+                }
+            }
+        }
+
+        let clean_region = super_clean_region.clone();
+        let mut super_clean_region: Vec<(usize, usize)> = Vec::new();
+
+        for i in (0..BOARD_SIZE).rev() {
+            for j in 0..BOARD_SIZE {
+                let stone = (i, j);
+                let previous_stone = (i + 1, j);
+
+                if !stone_exists(clean_region.clone(), previous_stone)
+                    && stone_exists(clean_region.clone(), stone)
+                {
+                    let stone_1 = (i, j - 1);
+                    let stone_2 = (i, j);
+
+                    if stone_exists(our_stones.clone(), stone_1)
+                        && stone_exists(our_stones.clone(), stone_2)
+                    {
+                        super_clean_region.push(stone);
+                    }
+                } else if stone_exists(clean_region.clone(), stone) {
+                    super_clean_region.push(stone);
+                }
+            }
+        }
+
+        (Some(super_clean_region), visited, stone_annihilate_region)
     }
 
     fn legal_go_moves(
@@ -345,7 +503,7 @@ impl GameLogic {
         black_stones: Vec<(usize, usize)>,
         white_tower: (usize, usize),
         black_tower: (usize, usize),
-    ) -> Vec<Vec<(usize, usize)>> {
+    ) -> (Vec<Vec<(usize, usize)>>, Vec<(usize, usize)>) {
         let (
             (_our_draughts, our_stones, _our_tower),
             (_enemy_draughts, _enemy_stones, _enemy_tower),
@@ -360,21 +518,29 @@ impl GameLogic {
             ),
         };
 
-        let mut visited: Vec<(usize, usize)> = Vec::new();
+        let mut stone_removal_coords: Vec<(usize, usize)> = Vec::new();
         let mut convexes = Vec::new();
+        let mut visited: Vec<(usize, usize)> = Vec::new();
         for i in 0..BOARD_SIZE {
             for j in 0..BOARD_SIZE {
-                let (region, visited_) =
+                let (region, visited_, stone_annihite_region) =
                     self.find_region((i, j), our_stones.clone(), visited.clone());
 
                 if region.is_some() {
                     convexes.push(region.unwrap());
+                    stone_removal_coords.extend(stone_annihite_region);
                     visited = visited_;
                 }
             }
         }
 
-        convexes
+        stone_removal_coords = stone_removal_coords
+            .into_iter()
+            .collect::<HashSet<(usize, usize)>>()
+            .into_iter()
+            .collect();
+
+        (convexes, stone_removal_coords)
     }
 
     fn legal_draught_moves(
@@ -390,6 +556,7 @@ impl GameLogic {
     ) -> (
         Vec<(usize, usize)>,
         Vec<CheckersMoveType>,
+        Vec<(usize, usize)>,
         Vec<(usize, usize)>,
     ) {
         let (
@@ -414,7 +581,7 @@ impl GameLogic {
         // occupied_squares.extend(our_stones);
         // occupied_squares.extend(enemy_stones);
 
-        let opposite_stones = self.legal_go_moves(
+        let (opposite_stones, stone_removals) = self.legal_go_moves(
             match turn {
                 Turn::Black => Turn::White,
                 Turn::White => Turn::Black,
@@ -945,7 +1112,7 @@ impl GameLogic {
         //     }
         // }
 
-        (legal_moves, legal_movetypes, takeovers)
+        (legal_moves, legal_movetypes, takeovers, stone_removals)
     }
 }
 
@@ -956,10 +1123,10 @@ fn check_game_termination(
     // mut selected_draught: ResMut<SelectedDraught>,
     // mut q_nuke_draught_button: Query<(Entity, &mut Visibility, &ButtonNukeDraught)>,
     mut text_query: Query<(&mut Text, &mut Visibility, &NextMoveText)>,
-    game_phase: Res<State<GamePhase>>,
+    mut next_game_phase: ResMut<NextState<GamePhase>>,
+    current_game_phase: Res<State<GamePhase>>,
 ) {
-    let game_phase = game_phase.into_inner();
-    let game_phase = game_phase.get();
+    let game_phase = current_game_phase.get();
     if *game_phase == GamePhase::Initialize
         || *game_phase == GamePhase::PlaceWatchtower
         || *game_phase == GamePhase::TriggerPlaceWatchtower
@@ -977,6 +1144,10 @@ fn check_game_termination(
         .filter(|(_, w)| w.side == Side::Black)
         .count();
 
+    if n_white_towers != 0 && n_white_towers != 0 {
+        return;
+    }
+
     let mut gameover_text = "";
 
     if n_white_towers == 0 {
@@ -991,6 +1162,8 @@ fn check_game_termination(
         text.sections[0].value = gameover_text.into();
         *v = Visibility::Visible;
     }
+
+    next_game_phase.set(GamePhase::GameOver);
 }
 
 #[allow(clippy::type_complexity)]
@@ -1005,9 +1178,13 @@ fn nuke_draught_button_system(
     q_watchtowers: Query<(Entity, &Watchtower)>,
     mut selected_draught: ResMut<SelectedDraught>,
     mut q_nuke_draught_button: Query<(Entity, &mut Visibility, &ButtonNukeDraught)>,
-    turn: Res<Turn>,
+    mut turn: ResMut<Turn>,
+    mut game_logic: ResMut<GameLogic>,
+
+    mut game_phase: ResMut<NextState<GamePhase>>,
 ) {
-    let side = match *turn.into_inner() {
+    let turn_ = turn.clone();
+    let side = match turn_ {
         Turn::Black => Side::Black,
         Turn::White => Side::White,
     };
@@ -1069,6 +1246,12 @@ fn nuke_draught_button_system(
                 }
 
                 *color = PRESSED_BUTTON.into();
+
+                game_logic.log(GamePhase::MoveDraught, turn_);
+                let (next_phase, next_turn) = game_logic.next_state();
+                *turn = next_turn;
+                game_phase.set(next_phase);
+                return;
             }
             Interaction::Hovered => {
                 *color = HOVERED_BUTTON.into();
@@ -1117,11 +1300,11 @@ impl Plugin for WatchtowerPlugin {
     fn build(&self, app: &mut App) {
         app.add_state::<GamePhase>();
         app.init_resource::<Turn>();
-        app.add_plugins(TweeningPlugin)
-            .add_plugins(DefaultPickingPlugins)
+        app.add_plugins(DefaultPickingPlugins)
+            .add_systems(Update, bevy_mod_picking::debug::hide_pointer_text)
             .add_systems(Startup, init_buttons)
             .add_systems(Update, nuke_draught_button_system)
-            .add_systems(Update, init_game_over_text)
+            .add_systems(Startup, init_game_over_text)
             .add_systems(Update, check_game_termination)
             .add_systems(OnEnter(GameState::Watchtower), (spawn_camera, spawn_board))
             .add_systems(OnEnter(GamePhase::PlaceWatchtower), spawn_watchtower)
@@ -1151,7 +1334,8 @@ impl Plugin for WatchtowerPlugin {
             .add_event::<EventClickCircle>()
             .add_event::<EventClickDraught>()
             .insert_resource(GameLogic::new())
-            .insert_resource(SelectedDraught { n: None });
+            .insert_resource(SelectedDraught { n: None })
+            .insert_resource(ClearColor(Color::BLACK));
     }
 }
 
@@ -1269,7 +1453,6 @@ fn move_draught(
     mut game_phase: ResMut<NextState<GamePhase>>,
     materials: Res<MaterialAssets>,
     meshes: Res<MeshAssets>,
-
     mut q_nuke_draught_button: Query<(Entity, &mut Visibility, &ButtonNukeDraught)>,
 ) {
     if selected_draught.n.is_none() {
@@ -1330,16 +1513,17 @@ fn move_draught(
         let draught_entity = draught.0;
         let draught = draught.2;
 
-        let (possible_moves, possible_movetypes, takeovers) = game_logic.legal_draught_moves(
-            turn_,
-            (draught.i, draught.j),
-            black_draughts,
-            white_draughts,
-            white_stones,
-            black_stones,
-            white_watchtower,
-            black_watchtower,
-        );
+        let (possible_moves, possible_movetypes, takeovers, stone_removals) = game_logic
+            .legal_draught_moves(
+                turn_,
+                (draught.i, draught.j),
+                black_draughts,
+                white_draughts,
+                white_stones,
+                black_stones,
+                white_watchtower,
+                black_watchtower,
+            );
 
         if !possible_moves.contains(&(square.i, square.j)) {
             println!("Illegal move");
@@ -1646,14 +1830,21 @@ fn place_stone(
 
     let white_watchtower = q_watchtowers
         .iter_mut()
-        .find(|(_, watchtower)| watchtower.side == Side::White)
-        .unwrap();
+        .find(|(_, watchtower)| watchtower.side == Side::White);
+    if white_watchtower.is_none() {
+        return;
+    }
+    let white_watchtower = white_watchtower.unwrap();
     let white_watchtower = (white_watchtower.1.i, white_watchtower.1.j);
 
     let black_watchtower = q_watchtowers
         .iter_mut()
-        .find(|(_, watchtower)| watchtower.side == Side::Black)
-        .unwrap();
+        .find(|(_, watchtower)| watchtower.side == Side::Black);
+
+    if black_watchtower.is_none() {
+        return;
+    }
+    let black_watchtower = black_watchtower.unwrap();
     let black_watchtower = (black_watchtower.1.i, black_watchtower.1.j);
 
     let turn_ = *turn;
@@ -1692,7 +1883,7 @@ fn place_stone(
             Side::White => white_stones.push((circle.i, circle.j)),
         }
 
-        let convex_sets = game_logic.legal_go_moves(
+        let (convex_set, stone_removals) = game_logic.legal_go_moves(
             turn_,
             black_draughts.clone(),
             white_draughts.clone(),
@@ -1718,22 +1909,24 @@ fn place_stone(
             Side::White => black_draughts.clone(),
         };
 
-        for convex in convex_sets.iter() {
-            for (i, j) in convex.iter() {
-                for enemy_stone in enemy_stones.iter() {
-                    if !(enemy_stone.0 == *i && enemy_stone.1 == *j) {
-                        continue;
-                    }
-
-                    let stone_entity = q_stones
-                        .iter()
-                        .find(|(_, stone)| (stone.i == enemy_stone.0 && stone.j == enemy_stone.1));
-                    if stone_entity.is_some() {
-                        let stone_entity = stone_entity.unwrap().0;
-                        commands.entity(stone_entity).despawn_recursive();
-                    }
+        for (i, j) in stone_removals.iter() {
+            for enemy_stone in enemy_stones.iter() {
+                if !(enemy_stone.0 == *i && enemy_stone.1 == *j) {
+                    continue;
                 }
 
+                let stone_entity = q_stones
+                    .iter()
+                    .find(|(_, stone)| (stone.i == enemy_stone.0 && stone.j == enemy_stone.1));
+                if stone_entity.is_some() {
+                    let stone_entity = stone_entity.unwrap().0;
+                    commands.entity(stone_entity).despawn_recursive();
+                }
+            }
+        }
+
+        for convex in convex_set.iter() {
+            for (i, j) in convex.iter() {
                 // takeover pieces
                 for enemy_draught in enemy_draughts.iter() {
                     if !(enemy_draught.0 == *i && enemy_draught.1 == *j) {
@@ -1778,20 +1971,18 @@ fn place_stone(
                 }
 
                 // spawn debug square
-                // commands.spawn((
-                //     PbrBundle {
-                //         mesh: meshes.square_plane.clone(),
-                //         material: materials.red.clone(),
-                //         transform: Transform::from_translation(Vec3::new(
-                //             *i as f32 + 0.5,
-                //             0.0005,
-                //             *j as f32 + 0.5,
-                //         )),
-                //         ..default()
-                //     },
-                //     Name::new("DebugSquare"),
-                //     DebugSquare,
-                // ));
+                commands.spawn((
+                    PbrBundle {
+                        mesh: meshes.square_plane.clone(),
+                        material: materials.red.clone(),
+                        transform: Transform::from_translation(Vec3::new(
+                            *i as f32, 0.0005, *j as f32,
+                        )),
+                        ..default()
+                    },
+                    Name::new("DebugSquare"),
+                    DebugSquare,
+                ));
             }
         }
 
@@ -1989,10 +2180,15 @@ fn place_watchtower(
     };
 
     for click in er_click_square.read() {
-        let watchtower = q_watchtower.get_component::<Watchtower>(click.0).unwrap();
-        let center = (watchtower.i, watchtower.j);
-        *turn = stop(center);
-        return;
+        let watchtower = q_watchtower.get_component::<Watchtower>(click.0);
+
+        if watchtower.is_ok() {
+            let watchtower = watchtower.unwrap();
+            let center = (watchtower.i, watchtower.j);
+            *turn = stop(center);
+
+            return;
+        }
     }
 
     let opposite_side = match side {
