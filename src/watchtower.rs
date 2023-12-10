@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use crate::loading::{MaterialAssets, MeshAssets};
 use crate::GameState;
-use bevy::core_pipeline::clear_color;
 use bevy::prelude::*;
 
 use bevy_mod_picking::prelude::*;
@@ -32,7 +31,6 @@ enum Side {
 struct Square {
     pub i: usize,
     pub j: usize,
-    pub side: Side,
 }
 
 #[derive(Component)]
@@ -101,9 +99,65 @@ enum GoMoveType {
     TowerTakeOver,
 }
 
+#[derive(Debug)]
+struct GameStats {
+    n_moves: usize,
+    white_territory: usize,
+    black_territory: usize,
+    white_draughts: usize,
+    black_draughts: usize,
+}
+
 impl GameLogic {
     fn new() -> Self {
         GameLogic { log: vec![] }
+    }
+
+    fn stats(
+        &self,
+        black_draughts: Vec<(usize, usize)>,
+        white_draughts: Vec<(usize, usize)>,
+        white_stones: Vec<(usize, usize)>,
+        black_stones: Vec<(usize, usize)>,
+    ) -> GameStats {
+        let n_moves = self.log.len() - 2;
+        let (white_regions, _) = self.legal_go_moves(
+            Turn::White,
+            black_draughts.clone(),
+            white_draughts.clone(),
+            white_stones.clone(),
+            black_stones.clone(),
+            (0, 0),
+            (0, 0),
+        );
+
+        let (black_regions, _) = self.legal_go_moves(
+            Turn::Black,
+            black_draughts.clone(),
+            white_draughts.clone(),
+            white_stones.clone(),
+            black_stones.clone(),
+            (0, 0),
+            (0, 0),
+        );
+
+        let mut white_territory = 0;
+        for set in white_regions.iter() {
+            white_territory += set.len();
+        }
+
+        let mut black_territory = 0;
+        for set in black_regions.iter() {
+            black_territory += set.len();
+        }
+
+        GameStats {
+            n_moves,
+            white_territory: white_territory,
+            black_territory: black_territory,
+            white_draughts: white_draughts.len(),
+            black_draughts: black_draughts.len(),
+        }
     }
 
     fn log(&mut self, game_phase: GamePhase, turn: Turn) {
@@ -1296,6 +1350,90 @@ fn init_game_over_text(mut commands: Commands) {
         .insert(Pickable::IGNORE);
 }
 
+#[derive(Component)]
+struct GameStatsText;
+
+fn init_stats_text(mut commands: Commands) {
+    let text = Text::from_section(
+        "",
+        TextStyle {
+            font_size: 15.0,
+            color: Color::WHITE,
+            ..default()
+        },
+    )
+    .with_alignment(TextAlignment::Left);
+
+    // root node
+    commands
+        .spawn((NodeBundle {
+            style: Style {
+                position_type: PositionType::Absolute,
+                right: Val::Percent(10.),
+                top: Val::Percent(10.),
+                width: Val::Px(250.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        },))
+        .with_children(|parent| {
+            parent
+                .spawn(TextBundle {
+                    text,
+                    ..Default::default()
+                })
+                .insert((GameStatsText, Visibility::Visible));
+        })
+        .insert(Pickable::IGNORE);
+}
+
+fn show_stats(
+    mut commands: Commands,
+    mut er_click_square: EventReader<EventClickSquare>,
+    mut q_draughts: Query<(Entity, &mut Transform, &mut Draught)>,
+    mut q_stones: Query<&Stone>,
+    mut q_watchtowers: Query<&Watchtower>,
+    q_squares: Query<(Entity, &mut Transform, &mut Square), Without<Draught>>,
+    mut selected_draught: ResMut<SelectedDraught>,
+    mut turn: ResMut<Turn>,
+    mut game_logic: ResMut<GameLogic>,
+    mut game_phase: ResMut<NextState<GamePhase>>,
+    materials: Res<MaterialAssets>,
+    meshes: Res<MeshAssets>,
+    mut q_nuke_draught_button: Query<(Entity, &mut Visibility, &ButtonNukeDraught)>,
+    mut text_query: Query<(&mut Text, &GameStatsText)>,
+) {
+    let black_draughts = q_draughts
+        .iter_mut()
+        .filter(|(_, _, draught)| draught.side == Side::Black)
+        .map(|(_, _, draught)| (draught.i, draught.j))
+        .collect::<Vec<(usize, usize)>>();
+
+    let white_draughts = q_draughts
+        .iter_mut()
+        .filter(|(_, _, draught)| draught.side == Side::White)
+        .map(|(_, _, draught)| (draught.i, draught.j))
+        .collect::<Vec<(usize, usize)>>();
+
+    let black_stones = q_stones
+        .iter_mut()
+        .filter(|go_piece| go_piece.side == Side::Black)
+        .map(|go_piece| (go_piece.i, go_piece.j))
+        .collect::<Vec<(usize, usize)>>();
+
+    let white_stones = q_stones
+        .iter_mut()
+        .filter(|go_piece| go_piece.side == Side::White)
+        .map(|go_piece| (go_piece.i, go_piece.j))
+        .collect::<Vec<(usize, usize)>>();
+
+    let stats = game_logic.stats(black_draughts, white_draughts, white_stones, black_stones);
+
+    for (mut text, _tag) in text_query.iter_mut() {
+        text.sections[0].value = format!("stats: {:?}", stats);
+    }
+}
+
 impl Plugin for WatchtowerPlugin {
     fn build(&self, app: &mut App) {
         app.add_state::<GamePhase>();
@@ -1306,7 +1444,10 @@ impl Plugin for WatchtowerPlugin {
             .add_systems(Update, nuke_draught_button_system)
             .add_systems(Startup, init_game_over_text)
             .add_systems(Update, check_game_termination)
-            .add_systems(OnEnter(GameState::Watchtower), (spawn_camera, spawn_board))
+            .add_systems(
+                OnEnter(GameState::Watchtower),
+                (spawn_camera, spawn_board, init_stats_text),
+            )
             .add_systems(OnEnter(GamePhase::PlaceWatchtower), spawn_watchtower)
             .add_systems(
                 OnEnter(GamePhase::TriggerPlaceWatchtower),
@@ -1314,8 +1455,14 @@ impl Plugin for WatchtowerPlugin {
                     game_phase.set(GamePhase::PlaceWatchtower);
                 },
             )
-            .add_systems(OnEnter(GamePhase::PlaceGoPiece), spawn_go_piece)
-            .add_systems(OnEnter(GamePhase::MoveDraught), prepare_move_draught)
+            .add_systems(
+                OnEnter(GamePhase::PlaceGoPiece),
+                (spawn_go_piece, show_stats),
+            )
+            .add_systems(
+                OnEnter(GamePhase::MoveDraught),
+                (prepare_move_draught, show_stats),
+            )
             .add_systems(
                 Update,
                 place_watchtower.run_if(in_state(GamePhase::PlaceWatchtower)),
@@ -2022,7 +2169,7 @@ fn spawn_board(
                     transform: Transform::from_translation(Vec3::new(i as f32, 0.0, j as f32)),
                     ..default()
                 },
-                Square { i, j, side },
+                Square { i, j },
                 Name::new("Square"),
                 PickableBundle::default(),
                 On::<Pointer<Over>>::send_event::<EventHoverSquare>(),
