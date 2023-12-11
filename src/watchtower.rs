@@ -1649,6 +1649,11 @@ fn move_draught(
     let black_watchtower = (black_watchtower.i, black_watchtower.j);
 
     for click in er_click_square.read() {
+        let square = q_squares.get_component::<Square>(click.0);
+        if square.is_err() {
+            continue;
+        }
+
         let square = q_squares.get_component::<Square>(click.0).unwrap();
 
         let draught = q_draughts
