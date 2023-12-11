@@ -19,11 +19,11 @@ struct NeuralMusic(Handle<AudioInstance>);
 fn start_audio(mut commands: Commands, audio_assets: Res<AudioAssets>, audio: Res<Audio>) {
     info!("audio");
 
-    audio.pause();
-    let handle = audio
-        .play(audio_assets.neural.clone())
-        .looped()
-        .with_volume(0.3)
-        .handle();
-    commands.insert_resource(NeuralMusic(handle));
+    // audio.pause();
+    // let handle = audio
+    //     .play(audio_assets.neural.clone())
+    //     .looped()
+    //     .with_volume(0.3)
+    //     .handle();
+    // commands.insert_resource(NeuralMusic(handle));
 }

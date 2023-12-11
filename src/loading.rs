@@ -22,8 +22,8 @@ impl Plugin for LoadingPlugin {
 
 #[derive(AssetCollection, Resource)]
 pub struct AudioAssets {
-    #[asset(path = "audio/neural.mp3")]
-    pub neural: Handle<AudioSource>,
+    // #[asset(path = "audio/neural.mp3")]
+    // pub neural: Handle<AudioSource>,
 }
 
 #[derive(AssetCollection, Resource)]
