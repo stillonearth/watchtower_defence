@@ -1,14 +1,17 @@
 #![allow(clippy::type_complexity)]
 
 mod audio;
+mod events;
+mod game;
 mod loading;
+mod logic;
 mod menu;
-mod watchtower;
+mod ui;
 
 use crate::audio::InternalAudioPlugin;
+use crate::game::WatchtowerPlugin;
 use crate::loading::LoadingPlugin;
 use crate::menu::MenuPlugin;
-use crate::watchtower::WatchtowerPlugin;
 
 use bevy::app::App;
 

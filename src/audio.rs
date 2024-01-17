@@ -16,7 +16,7 @@ impl Plugin for InternalAudioPlugin {
 #[derive(Resource)]
 struct NeuralMusic(Handle<AudioInstance>);
 
-fn start_audio(mut commands: Commands, audio_assets: Res<AudioAssets>, audio: Res<Audio>) {
+fn start_audio(_commands: Commands, _audio_assets: Res<AudioAssets>, _audio: Res<Audio>) {
     info!("audio");
 
     // audio.pause();
